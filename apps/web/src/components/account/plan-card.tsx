@@ -1,6 +1,7 @@
 'use client'
 
 import { useAction } from 'convex/react'
+import { ConvexError } from 'convex/values'
 import Link from 'next/link'
 import { useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
@@ -22,6 +23,12 @@ import {
 } from '@/lib/entitlements'
 import { formatNumber, usagePeriod } from '@/lib/format'
 import { formatPrice, PRICING, proPerMonth } from '@/lib/pricing'
+
+/** The readable part of an action failure: ConvexError data survives production's scrubbing. */
+function messageOf(err: unknown, fallback: string): string {
+  if (err instanceof ConvexError && typeof err.data === 'string') return err.data
+  return fallback
+}
 
 /*
  * The plan card: where the account stands (trial, free tier or Pro), every meter that applies,
@@ -219,7 +226,7 @@ function UpgradePanel({
       const { url } = await createCheckout({ interval })
       window.location.assign(url)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not start checkout')
+      setError(messageOf(err, 'Could not start checkout'))
       setPending(false)
     }
   }
@@ -336,7 +343,7 @@ function BillingPanel({ billing }: { billing: BillingStatus | null }) {
       const { url } = await createPortal({})
       window.location.assign(url)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not open billing')
+      setError(messageOf(err, 'Could not open billing'))
       setPending(false)
     }
   }

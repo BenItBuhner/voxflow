@@ -1,4 +1,4 @@
-import { v } from 'convex/values'
+import { ConvexError, v } from 'convex/values'
 import { internal } from './_generated/api'
 import type { Doc } from './_generated/dataModel'
 import { action, httpAction, internalMutation, type MutationCtx } from './_generated/server'
@@ -20,7 +20,11 @@ import {
   type SubscriptionSnapshot
 } from './lib/stripe'
 import { findUserByClerkId, planStateOf, upsertUser } from './lib/users'
-import { billingStatusValidator, subscriptionStatusValidator, type BillingStatus } from './lib/validators'
+import {
+  billingStatusValidator,
+  subscriptionStatusValidator,
+  type BillingStatus
+} from './lib/validators'
 
 /**
  * Pro subscriptions through Stripe. The account page asks for a Checkout or Portal URL through the
@@ -52,9 +56,11 @@ export const status = authedQuery({
   }
 })
 
-async function requireSubject(ctx: { auth: { getUserIdentity(): Promise<{ subject: string } | null> } }): Promise<string> {
+async function requireSubject(ctx: {
+  auth: { getUserIdentity(): Promise<{ subject: string } | null> }
+}): Promise<string> {
   const subject = await subjectOf(ctx.auth)
-  if (!subject) throw new Error('Not authenticated')
+  if (!subject) throw new ConvexError('Not authenticated')
   return subject
 }
 
@@ -65,9 +71,10 @@ export const createCheckoutSession = action({
   handler: async (ctx, args) => {
     const clerkId = await requireSubject(ctx)
     const config = readStripeConfig(process.env)
-    if (!config || !config.siteUrl) throw new Error('Billing is not switched on for this Murmur instance yet')
+    if (!config || !config.siteUrl)
+      throw new ConvexError('Billing is not switched on for this Murmur instance yet')
     const account = await ctx.runMutation(internal.billing.accountForCheckout, { clerkId })
-    if (account.planState === 'pro') throw new Error('This account is already on Pro')
+    if (account.planState === 'pro') throw new ConvexError('This account is already on Pro')
     let session: { url?: string | null }
     try {
       session = await stripeRequest<{ url?: string | null }>(
@@ -83,9 +90,13 @@ export const createCheckoutSession = action({
       )
     } catch (err) {
       console.error('[billing] checkout session failed', err instanceof Error ? err.message : err)
-      throw new Error(err instanceof StripeApiError ? `Stripe could not start Checkout: ${err.message}` : 'Could not reach Stripe')
+      throw new ConvexError(
+        err instanceof StripeApiError
+          ? `Stripe could not start Checkout: ${err.message}`
+          : 'Could not reach Stripe'
+      )
     }
-    if (!session.url) throw new Error('Stripe did not return a Checkout URL')
+    if (!session.url) throw new ConvexError('Stripe did not return a Checkout URL')
     return { url: session.url }
   }
 })
@@ -97,9 +108,11 @@ export const createPortalSession = action({
   handler: async (ctx) => {
     const clerkId = await requireSubject(ctx)
     const config = readStripeConfig(process.env)
-    if (!config || !config.siteUrl) throw new Error('Billing is not switched on for this Murmur instance yet')
+    if (!config || !config.siteUrl)
+      throw new ConvexError('Billing is not switched on for this Murmur instance yet')
     const account = await ctx.runMutation(internal.billing.accountForCheckout, { clerkId })
-    if (!account.stripeCustomerId) throw new Error('This account has no billing history to manage yet')
+    if (!account.stripeCustomerId)
+      throw new ConvexError('This account has no billing history to manage yet')
     let session: { url?: string | null }
     try {
       session = await stripeRequest<{ url?: string | null }>(
@@ -110,9 +123,13 @@ export const createPortalSession = action({
       )
     } catch (err) {
       console.error('[billing] portal session failed', err instanceof Error ? err.message : err)
-      throw new Error(err instanceof StripeApiError ? `Stripe could not open billing: ${err.message}` : 'Could not reach Stripe')
+      throw new ConvexError(
+        err instanceof StripeApiError
+          ? `Stripe could not open billing: ${err.message}`
+          : 'Could not reach Stripe'
+      )
     }
-    if (!session.url) throw new Error('Stripe did not return a billing URL')
+    if (!session.url) throw new ConvexError('Stripe did not return a billing URL')
     return { url: session.url }
   }
 })
@@ -127,7 +144,11 @@ export const accountForCheckout = internalMutation({
   }),
   handler: async (ctx, args) => {
     const user = await upsertUser(ctx, args.clerkId, {}, Date.now())
-    return { email: user.email, planState: planStateOf(user), stripeCustomerId: user.stripeCustomerId }
+    return {
+      email: user.email,
+      planState: planStateOf(user),
+      stripeCustomerId: user.stripeCustomerId
+    }
   }
 })
 
@@ -180,10 +201,12 @@ export const applySubscription = internalMutation({
     const current = user.subscription
     if (current && current.id === sub.id && current.eventAt > args.eventAt) return 'stale'
     // A newer subscription replaces an older one; an update to an old, replaced one is ignored.
-    if (current && current.id !== sub.id && entitlesPro(current.status) && !entitlesPro(sub.status)) return 'stale'
+    if (current && current.id !== sub.id && entitlesPro(current.status) && !entitlesPro(sub.status))
+      return 'stale'
     const now = Date.now()
     const pro = entitlesPro(sub.status)
-    const paymentFailedAt = sub.status === 'past_due' ? (current?.paymentFailedAt ?? args.eventAt) : undefined
+    const paymentFailedAt =
+      sub.status === 'past_due' ? (current?.paymentFailedAt ?? args.eventAt) : undefined
     await ctx.db.patch('users', user._id, {
       plan: pro ? 'pro' : stateWithoutSubscription(user, now),
       stripeCustomerId: sub.customerId ?? user.stripeCustomerId,
@@ -205,7 +228,11 @@ export const applySubscription = internalMutation({
 
 /** A failed invoice: keep Pro (Stripe retries), flag it so the account page can say so. */
 export const markPaymentFailed = internalMutation({
-  args: { customerId: v.union(v.string(), v.null()), subscriptionId: v.union(v.string(), v.null()), failedAt: v.number() },
+  args: {
+    customerId: v.union(v.string(), v.null()),
+    subscriptionId: v.union(v.string(), v.null()),
+    failedAt: v.number()
+  },
   returns: v.boolean(),
   handler: async (ctx, args) => {
     const user = args.customerId ? await findByCustomer(ctx, args.customerId) : null
@@ -227,7 +254,10 @@ export const attachCustomer = internalMutation({
     const user = await findUserByClerkId(ctx, args.clerkId)
     if (!user) return false
     if (user.stripeCustomerId !== args.customerId)
-      await ctx.db.patch('users', user._id, { stripeCustomerId: args.customerId, updatedAt: Date.now() })
+      await ctx.db.patch('users', user._id, {
+        stripeCustomerId: args.customerId,
+        updatedAt: Date.now()
+      })
     return true
   }
 })
@@ -245,9 +275,15 @@ export const stripeWebhook = httpAction(async (ctx, request) => {
   }
   const payload = await request.text()
   try {
-    await verifyStripeSignature(payload, request.headers.get('stripe-signature'), config.webhookSecret, Date.now())
+    await verifyStripeSignature(
+      payload,
+      request.headers.get('stripe-signature'),
+      config.webhookSecret,
+      Date.now()
+    )
   } catch (err) {
-    if (err instanceof StripeSignatureError) return new Response(`Invalid webhook: ${err.message}`, { status: 400 })
+    if (err instanceof StripeSignatureError)
+      return new Response(`Invalid webhook: ${err.message}`, { status: 400 })
     throw err
   }
   let body: unknown
@@ -260,21 +296,35 @@ export const stripeWebhook = httpAction(async (ctx, request) => {
   switch (event.type) {
     case 'checkout.session.completed': {
       if (event.clerkId && event.customerId)
-        await ctx.runMutation(internal.billing.attachCustomer, { clerkId: event.clerkId, customerId: event.customerId })
+        await ctx.runMutation(internal.billing.attachCustomer, {
+          clerkId: event.clerkId,
+          customerId: event.customerId
+        })
       // The session only names the subscription; its current state comes from the API, so the
       // plan is right even if customer.subscription.* events arrive later or not at all.
       if (event.subscriptionId) {
         let snapshot: SubscriptionSnapshot | null = null
         try {
-          const raw = await stripeRequest<unknown>(config.secretKey, 'GET', `/v1/subscriptions/${event.subscriptionId}`)
+          const raw = await stripeRequest<unknown>(
+            config.secretKey,
+            'GET',
+            `/v1/subscriptions/${event.subscriptionId}`
+          )
           snapshot = subscriptionSnapshot(raw, config.prices)
         } catch (err) {
-          console.error('[billing] could not fetch subscription after checkout', err instanceof Error ? err.message : err)
+          console.error(
+            '[billing] could not fetch subscription after checkout',
+            err instanceof Error ? err.message : err
+          )
           return new Response('Could not fetch subscription', { status: 502 })
         }
         if (snapshot) {
           const outcome = await ctx.runMutation(internal.billing.applySubscription, {
-            subscription: { ...snapshot, clerkId: snapshot.clerkId ?? event.clerkId, customerId: snapshot.customerId ?? event.customerId },
+            subscription: {
+              ...snapshot,
+              clerkId: snapshot.clerkId ?? event.clerkId,
+              customerId: snapshot.customerId ?? event.customerId
+            },
             eventAt: event.created
           })
           console.log(`[billing] checkout ${event.id} subscription=${snapshot.id} ${outcome}`)
@@ -288,7 +338,9 @@ export const stripeWebhook = httpAction(async (ctx, request) => {
         subscription: event.subscription,
         eventAt: event.created
       })
-      console.log(`[billing] ${event.type} ${event.id} subscription=${event.subscription.id} status=${event.subscription.status} ${outcome}`)
+      console.log(
+        `[billing] ${event.type} ${event.id} subscription=${event.subscription.id} status=${event.subscription.status} ${outcome}`
+      )
       break
     }
     case 'invoice.payment_failed': {
@@ -297,7 +349,9 @@ export const stripeWebhook = httpAction(async (ctx, request) => {
         subscriptionId: event.subscriptionId,
         failedAt: event.created
       })
-      console.log(`[billing] payment failed ${event.id} customer=${event.customerId} flagged=${flagged}`)
+      console.log(
+        `[billing] payment failed ${event.id} customer=${event.customerId} flagged=${flagged}`
+      )
       break
     }
     case 'ignored':
