@@ -5,7 +5,15 @@ import { ButtonLink } from '@/components/ui/button'
 import { Chip } from '@/components/ui/section'
 import { Surface } from '@/components/ui/surface'
 import { cn } from '@/lib/cn'
-import { formatPrice, PRICING, proPerMonth, TIERS, type Billing, type Tier } from '@/lib/pricing'
+import {
+  formatPrice,
+  PRICING,
+  proPerMonth,
+  TIERS,
+  upgradeHref,
+  type Billing,
+  type Tier
+} from '@/lib/pricing'
 
 export function Plans() {
   const [billing, setBilling] = useState<Billing>('yearly')
@@ -107,13 +115,19 @@ function PlanCard({ tier, billing }: { tier: Tier; billing: Billing }) {
         ))}
       </ul>
 
+      {/* The Pro button carries the chosen interval into the account page's upgrade flow. */}
       <ButtonLink
-        href={tier.cta.href}
+        href={tier.id === 'pro' ? upgradeHref(billing) : tier.cta.href}
         variant={tier.id === 'local' ? 'raised' : 'primary'}
         className="mt-8 w-full"
       >
         {tier.cta.label}
       </ButtonLink>
+      {tier.id === 'pro' && (
+        <p className="mt-3 text-center text-meta text-muted-foreground">
+          New accounts start with {PRICING.trialDays} days of Pro before paying anything.
+        </p>
+      )}
     </Surface>
   )
 }

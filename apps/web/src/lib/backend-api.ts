@@ -11,5 +11,6 @@ export const api = anyApi as unknown as typeof backendApi
 
 export type UserDto = FunctionReturnType<typeof api.users.me>
 export type InferenceStatus = FunctionReturnType<typeof api.inference.status>
+export type BillingStatus = FunctionReturnType<typeof api.billing.status>
 export type StatsDto = FunctionReturnType<typeof api.stats.get>
 export type DeviceDto = FunctionReturnType<typeof api.devices.list>[number]

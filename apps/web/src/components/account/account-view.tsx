@@ -3,26 +3,15 @@
 import { SignIn, useClerk } from '@clerk/nextjs'
 import { Authenticated, AuthLoading, Unauthenticated, useMutation, useQuery } from 'convex/react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { useEffect, useSyncExternalStore } from 'react'
-import { Button, ButtonLink } from '@/components/ui/button'
-import { Chip } from '@/components/ui/section'
+import { CheckoutNotice, PlanCard } from '@/components/account/plan-card'
+import { Button } from '@/components/ui/button'
 import { Surface } from '@/components/ui/surface'
-import {
-  api,
-  type DeviceDto,
-  type InferenceStatus,
-  type StatsDto,
-  type UserDto
-} from '@/lib/backend-api'
-import { cn } from '@/lib/cn'
-import {
-  formatAudioSeconds,
-  formatNumber,
-  formatPeriod,
-  formatRelative,
-  usagePeriod
-} from '@/lib/format'
-import { formatPrice, PRICING, proPerMonth } from '@/lib/pricing'
+import { api, type DeviceDto, type StatsDto, type UserDto } from '@/lib/backend-api'
+import { checkoutOutcome, upgradeIntent, usageDayUtc } from '@/lib/entitlements'
+import { formatNumber, formatRelative } from '@/lib/format'
+import { PRICING } from '@/lib/pricing'
 
 const MINUTE = 60_000
 const subscribeNever = (): (() => void) => () => {}
@@ -69,9 +58,10 @@ function SignedOut() {
           on the device.
         </p>
         <ul className="mt-6 space-y-2.5 text-body text-foreground/85">
-          <li>See your plan and how much of this month’s allowance is used.</li>
-          <li>Every device that has connected to the account.</li>
           <li>{PRICING.trialDays} days of Pro to start, no card; a free tier after that.</li>
+          <li>See your plan, the days left in the trial and your usage against each limit.</li>
+          <li>Upgrade to Pro, change the card or cancel, all from here.</li>
+          <li>Every device that has connected to the account.</li>
         </ul>
       </div>
       <div className="flex justify-center lg:justify-end">
@@ -84,20 +74,28 @@ function SignedOut() {
 function SignedInAccount() {
   const ensure = useMutation(api.users.ensure)
   useEffect(() => {
-    // Provisions the account row on first contact, exactly as the apps do after connecting.
+    // Provisions the account row on first contact (which starts the trial), exactly as the apps do.
     void ensure({})
   }, [ensure])
 
+  const now = useNow()
+  const params = useSearchParams()
+  const upgrade = upgradeIntent(params.get('upgrade'))
+  const checkout = checkoutOutcome(params.get('checkout'))
+
   const me = useQuery(api.users.me)
-  const status = useQuery(api.inference.status)
+  // The backend keys daily usage by UTC day; passing it keeps the query stable within a day.
+  const status = useQuery(api.inference.status, { day: usageDayUtc(now) })
+  const billing = useQuery(api.billing.status)
   const stats = useQuery(api.stats.get)
   const devices = useQuery(api.devices.list)
 
   return (
     <div className="grid gap-card">
+      {checkout && <CheckoutNotice outcome={checkout} planState={status?.planState ?? null} />}
       <ProfileCard user={me ?? null} />
       <div className="grid gap-card lg:grid-cols-[1.15fr_0.85fr]">
-        <PlanCard status={status ?? null} />
+        <PlanCard status={status ?? null} billing={billing ?? null} now={now} upgrade={upgrade} />
         <StatsCard stats={stats ?? null} />
       </div>
       <DevicesCard devices={devices ?? null} />
@@ -149,109 +147,6 @@ function ProfileCard({ user }: { user: UserDto | null }) {
         </Button>
       </div>
     </Surface>
-  )
-}
-
-function PlanCard({ status }: { status: InferenceStatus | null }) {
-  const period = usagePeriod(useNow())
-  const plan = status?.plan ?? 'free'
-  const thisMonth = status && status.usage.period === period ? status.usage : null
-  const sttUsed = thisMonth?.sttSeconds ?? 0
-  const tokensUsed = thisMonth?.llmTokens ?? 0
-  const requests = (thisMonth?.sttRequests ?? 0) + (thisMonth?.llmRequests ?? 0)
-
-  return (
-    <Surface className="flex flex-col">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="eyebrow">Plan</div>
-          <h2 className="serif-display mt-2 text-heading">{plan === 'pro' ? 'Pro' : 'Free'}</h2>
-        </div>
-        <Chip tone={plan === 'pro' ? 'success' : 'well'}>{plan}</Chip>
-      </div>
-      <p className="mt-2 text-body text-muted-foreground">
-        {status
-          ? status.available
-            ? `Murmur’s speech and formatting models come with the account. ${Math.round(status.limits.sttSecondsPerMonth / 60)} minutes of transcription and ${formatNumber(status.limits.llmTokensPerMonth)} formatting tokens a month, up to ${status.limits.requestsPerMinute} requests a minute, clips up to ${Math.round(status.limits.maxClipSeconds / 60)} minutes.`
-            : 'This Murmur instance does not provide models of its own; the apps use the provider you connect under Models.'
-          : 'Waiting for your account status…'}
-      </p>
-
-      <div className="mt-card grid gap-2">
-        <Meter
-          label={`Transcription in ${formatPeriod(period)}`}
-          value={sttUsed}
-          max={status?.limits.sttSecondsPerMonth ?? 0}
-          display={`${formatAudioSeconds(sttUsed)} of ${status ? formatAudioSeconds(status.limits.sttSecondsPerMonth) : '—'}`}
-        />
-        <Meter
-          label="Formatting tokens"
-          value={tokensUsed}
-          max={status?.limits.llmTokensPerMonth ?? 0}
-          display={`${formatNumber(tokensUsed)} of ${status ? formatNumber(status.limits.llmTokensPerMonth) : '—'}`}
-        />
-        <div className="well flex items-baseline justify-between rounded-md px-4 py-3 text-note">
-          <span className="text-muted-foreground">Requests this month</span>
-          <span className="font-medium tabular-nums">{formatNumber(requests)}</span>
-        </div>
-      </div>
-
-      {plan !== 'pro' && (
-        <div className="well mt-card flex flex-wrap items-center justify-between gap-3 rounded-md px-4 py-3.5">
-          <div>
-            <div className="text-body font-medium">
-              Pro is {formatPrice(proPerMonth('yearly'))} a month, billed yearly
-            </div>
-            <div className="text-meta text-muted-foreground">
-              Or {formatPrice(PRICING.proMonthly)} monthly. Checkout opens here when billing goes
-              live.
-            </div>
-          </div>
-          <ButtonLink href="/pricing" size="sm">
-            What Pro includes
-          </ButtonLink>
-        </div>
-      )}
-    </Surface>
-  )
-}
-
-/* A meter: the label and figure over a track; the track is the one functional thin mark. */
-function Meter({
-  label,
-  value,
-  max,
-  display
-}: {
-  label: string
-  value: number
-  max: number
-  display: string
-}) {
-  const ratio = max > 0 ? Math.min(1, value / max) : 0
-  return (
-    <div className="well rounded-md px-4 py-3">
-      <div className="flex items-baseline justify-between gap-4 text-note">
-        <span className="text-muted-foreground">{label}</span>
-        <span className="font-medium tabular-nums">{display}</span>
-      </div>
-      <div
-        className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-input"
-        role="progressbar"
-        aria-valuemin={0}
-        aria-valuemax={max}
-        aria-valuenow={Math.min(value, max)}
-        aria-label={label}
-      >
-        <div
-          className={cn(
-            'h-full rounded-full transition-[width] duration-500',
-            ratio >= 0.9 ? 'bg-record' : 'bg-foreground/70'
-          )}
-          style={{ width: `${Math.round(ratio * 100)}%` }}
-        />
-      </div>
-    </div>
   )
 }
 
