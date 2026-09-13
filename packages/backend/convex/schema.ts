@@ -1,11 +1,12 @@
 import { defineSchema, defineTable } from 'convex/server'
 import { v } from 'convex/values'
-import { planValidator } from './lib/plans'
+import { planStateValidator } from './lib/plans'
 import {
   appRuleOverrides,
   dictationModeValidator,
   formattingPreferencesValidator,
   platformValidator,
+  subscriptionValidator,
   syncPreferencesValidator,
   toneValidator
 } from './lib/validators'
@@ -23,8 +24,17 @@ export default defineSchema({
     email: v.optional(v.string()),
     name: v.optional(v.string()),
     imageUrl: v.optional(v.string()),
-    /** Account tier; absent means `free`. Set through `internal.users.setPlan`. */
-    plan: v.optional(planValidator),
+    /**
+     * Where the account is in its lifecycle (see lib/plans.ts). Absent on rows created before the
+     * trial existed; they read as `free` until `upsertUser` or the backfill grants their trial.
+     */
+    plan: v.optional(planStateValidator),
+    /** End of the 14-day Pro trial, epoch ms. A scheduled `entitlements.endTrial` flips the state. */
+    trialEndsAt: v.optional(v.number()),
+    /** Stripe customer (`cus_…`) once the account has been through Checkout. */
+    stripeCustomerId: v.optional(v.string()),
+    /** Latest Stripe subscription snapshot; written only by the Stripe webhook. */
+    subscription: v.optional(subscriptionValidator),
     /** Account-level onboarding. Device-level steps (microphone, shortcut) are repeated per device. */
     onboardingCompletedAt: v.optional(v.number()),
     onboardingVersion: v.optional(v.number()),
@@ -32,7 +42,9 @@ export default defineSchema({
     historyCount: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number()
-  }).index('by_clerkId', ['clerkId']),
+  })
+    .index('by_clerkId', ['clerkId'])
+    .index('by_stripeCustomerId', ['stripeCustomerId']),
 
   /**
    * Managed inference consumed per account and calendar month (UTC). One row per (user, period);
@@ -51,6 +63,24 @@ export default defineSchema({
     windowCount: v.optional(v.number()),
     updatedAt: v.number()
   }).index('by_user_and_period', ['userId', 'period']),
+
+  /**
+   * Managed inference per account and UTC day, behind the rolling-week word cap and the daily
+   * guardrails of the free tier. One row per (user, day); a week is at most seven reads.
+   */
+  inferenceDays: defineTable({
+    userId: v.id('users'),
+    /** `YYYY-MM-DD` in UTC. */
+    day: v.string(),
+    /** Words in the transcripts the speech model returned. */
+    words: v.number(),
+    sttSeconds: v.number(),
+    /** Transcriptions. */
+    dictations: v.number(),
+    /** Formatting requests (chat completions and /v1/format). */
+    formats: v.number(),
+    updatedAt: v.number()
+  }).index('by_user_and_day', ['userId', 'day']),
 
   devices: defineTable({
     userId: v.id('users'),

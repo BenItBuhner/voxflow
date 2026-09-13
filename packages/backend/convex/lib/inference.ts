@@ -1,6 +1,8 @@
 import { autoTone } from '../../../text-engine/src/context'
+import { countWords } from '../../../text-engine/src/text'
 import type { AppCategory, DictionaryTerm, FormatContext, ResolvedTone } from '../../../text-engine/src/types'
-import type { Plan } from './plans'
+import type { Meter, Refusal } from './entitlements'
+import type { Plan, PlanState } from './plans'
 
 /**
  * Pure helpers behind the managed-inference gateway (convex/gateway.ts). Nothing here touches the
@@ -66,6 +68,35 @@ export function upstreamModelFor(upstream: Upstream, plan: Plan): string {
 }
 
 /**
+ * Origin of the website (`MURMUR_SITE_URL`, e.g. https://murmur.app): where limit errors send
+ * people to upgrade and where Stripe returns them after Checkout. Null when the instance has none.
+ */
+export function readSiteUrl(env: Env): string | null {
+  const raw = (env.MURMUR_SITE_URL ?? '').trim().replace(/\/+$/, '')
+  return /^https?:\/\//i.test(raw) ? raw : null
+}
+
+/** Where an account that hit a limit goes to pay; null for paying accounts and instances without a site. */
+export function upgradeUrlFor(env: Env, state: PlanState): string | null {
+  const site = readSiteUrl(env)
+  return site && state !== 'pro' ? `${site}/account?upgrade=yearly` : null
+}
+
+/**
+ * Words the speech model returned, for the rolling-week cap. Whisper-shaped JSON carries `text`;
+ * a plain-text response is counted as is.
+ */
+export function transcriptWords(body: string, contentType: string | null): number {
+  if (!body.trim()) return 0
+  try {
+    const json = JSON.parse(body) as { text?: unknown }
+    return typeof json.text === 'string' ? countWords(json.text) : 0
+  } catch {
+    return contentType && /^text\//i.test(contentType) ? countWords(body) : 0
+  }
+}
+
+/**
  * The Clerk subject behind a request, or null when there is no usable session. Convex throws on a
  * bearer token that is not even a JWT; to the gateway that is simply "not signed in", never a 500.
  */
@@ -109,12 +140,51 @@ export function gatewayError(
   status: number,
   code: GatewayErrorCode,
   message: string,
-  headers: Record<string, string> = {}
+  headers: Record<string, string> = {},
+  extra: object = {}
 ): Response {
   return new Response(
-    JSON.stringify({ error: { message, type: 'murmur_gateway_error', code } }),
+    JSON.stringify({ error: { message, type: 'murmur_gateway_error', code, ...extra } }),
     { status, headers: { 'content-type': 'application/json', ...headers } }
   )
+}
+
+/** The structured part of a limit, shared by limit errors and the paused /v1/format answer. */
+export interface LimitDetail {
+  limit: Meter['limit']
+  plan: Plan
+  planState: PlanState
+  used: number
+  allowed: number
+  resetsAt: number | null
+  upgradeUrl: string | null
+}
+
+export function limitDetail(
+  meter: Pick<Meter, 'limit' | 'used' | 'allowed'> & { resetsAt: number | null },
+  plan: Plan,
+  planState: PlanState,
+  env: Env
+): LimitDetail {
+  return {
+    limit: meter.limit,
+    plan,
+    planState,
+    used: meter.used,
+    allowed: meter.allowed,
+    resetsAt: meter.resetsAt,
+    upgradeUrl: upgradeUrlFor(env, planState)
+  }
+}
+
+/**
+ * A refused request as the clients render it: the existing `code`s (so current apps show the
+ * message verbatim), plus which limit, where it stands, when it resets and where to upgrade.
+ */
+export function limitError(refusal: Refusal, plan: Plan, planState: PlanState, env: Env): Response {
+  const headers: Record<string, string> = {}
+  if (refusal.retryAfterSec) headers['retry-after'] = String(refusal.retryAfterSec)
+  return gatewayError(refusal.status, refusal.code, refusal.message, headers, limitDetail(refusal, plan, planState, env))
 }
 
 // ---- multipart/form-data ---------------------------------------------------------------------

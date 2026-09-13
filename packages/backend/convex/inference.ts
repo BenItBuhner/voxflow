@@ -1,18 +1,41 @@
 import { v } from 'convex/values'
 import type { Doc, Id } from './_generated/dataModel'
-import { internalMutation, type MutationCtx } from './_generated/server'
-import { authedQuery } from './lib/functions'
-import { MURMUR_MODELS, readUpstreams } from './lib/inference'
+import { internalMutation, type MutationCtx, type QueryCtx } from './_generated/server'
 import {
-  DEFAULT_PLAN,
-  MAX_CLIP_SECONDS,
+  ZERO_MONTH,
+  checkFormatting,
+  checkRate,
+  checkTranscription,
+  formattingPaused,
+  meterValidator,
+  metersFor,
+  refusalValidator,
+  requestRateFor,
+  weekBuckets,
+  weekRollsAt,
+  type DayUsage,
+  type Meter,
+  type MonthUsage,
+  type UsageSnapshot
+} from './lib/entitlements'
+import { authedQuery } from './lib/functions'
+import { MURMUR_MODELS, readUpstreams, upgradeUrlFor } from './lib/inference'
+import {
+  DAY_MS,
   RATE_WINDOW_MS,
+  dayStart,
+  isUsageDay,
+  nextMonthStart,
   planLimits,
+  planStateValidator,
   planValidator,
+  shiftDay,
+  tierOf,
+  usageDay,
   usagePeriod,
-  type Plan
+  WEEK_DAYS
 } from './lib/plans'
-import { upsertUser } from './lib/users'
+import { planStateOf, upsertUser } from './lib/users'
 import {
   inferenceKindValidator,
   inferenceStatusValidator,
@@ -21,13 +44,12 @@ import {
 
 /**
  * Account-side view of the managed inference gateway (convex/gateway.ts): which models this
- * instance offers, what the account's tier allows, and how much of it has been used.
+ * instance offers, what the account's tier allows, and how much of it has been used. The rules
+ * themselves live in lib/entitlements.ts; this file reads and writes the usage rows around them.
  */
 
-const ZERO_USAGE = { sttSeconds: 0, sttRequests: 0, llmTokens: 0, llmRequests: 0 }
-
-async function usageFor(
-  ctx: MutationCtx,
+async function monthRow(
+  ctx: QueryCtx | MutationCtx,
   userId: Id<'users'>,
   period: string
 ): Promise<Doc<'inferenceUsage'> | null> {
@@ -37,13 +59,64 @@ async function usageFor(
     .unique()
 }
 
-/** The instance's managed models and this account's allowance and usage. */
+async function dayRows(
+  ctx: QueryCtx | MutationCtx,
+  userId: Id<'users'>,
+  from: string,
+  to: string
+): Promise<Doc<'inferenceDays'>[]> {
+  return await ctx.db
+    .query('inferenceDays')
+    .withIndex('by_user_and_day', (q) => q.eq('userId', userId).gte('day', from).lte('day', to))
+    .collect()
+}
+
+const toDayUsage = (row: Doc<'inferenceDays'>): DayUsage => ({
+  day: row.day,
+  words: row.words,
+  sttSeconds: row.sttSeconds,
+  dictations: row.dictations,
+  formats: row.formats
+})
+
+const toMonthUsage = (row: Doc<'inferenceUsage'> | null): MonthUsage =>
+  row
+    ? {
+        sttSeconds: row.sttSeconds,
+        sttRequests: row.sttRequests,
+        llmTokens: row.llmTokens,
+        llmRequests: row.llmRequests
+      }
+    : ZERO_MONTH
+
+/** The rolling week ending on `day` and the month containing it. */
+async function snapshotFor(
+  ctx: QueryCtx | MutationCtx,
+  userId: Id<'users'>,
+  day: string
+): Promise<UsageSnapshot> {
+  const weekStart = shiftDay(day, -(WEEK_DAYS - 1))
+  const [days, month] = await Promise.all([
+    dayRows(ctx, userId, weekStart, day),
+    monthRow(ctx, userId, day.slice(0, 7))
+  ])
+  return { day, days: days.map(toDayUsage), month: toMonthUsage(month) }
+}
+
+/**
+ * The instance's managed models and this account's allowance and usage. Pass `day`, the client's
+ * current UTC calendar day (`YYYY-MM-DD`), to get the rolling-week and per-day meters; the query
+ * takes the day rather than reading the clock so its result is stable and cacheable within a day.
+ */
 export const status = authedQuery({
-  args: {},
+  args: { day: v.optional(v.string()) },
   returns: inferenceStatusValidator,
-  handler: async (ctx): Promise<InferenceStatus> => {
+  handler: async (ctx, args): Promise<InferenceStatus> => {
+    if (args.day !== undefined && !isUsageDay(args.day))
+      throw new Error('"day" must be a UTC calendar day as YYYY-MM-DD')
     const upstreams = readUpstreams(process.env)
-    const plan: Plan = ctx.user?.plan ?? DEFAULT_PLAN
+    const planState = ctx.user ? planStateOf(ctx.user) : 'free'
+    const plan = tierOf(planState)
     const limits = planLimits(plan)
     // Newest month with any usage; `period` sorts lexicographically, so the index order is enough.
     const latest = ctx.user
@@ -53,14 +126,21 @@ export const status = authedQuery({
           .order('desc')
           .first()
       : null
-    return {
+    const base: InferenceStatus = {
       available: upstreams.stt !== null,
       models: {
         stt: upstreams.stt ? MURMUR_MODELS.stt : null,
         llm: upstreams.llm ? MURMUR_MODELS.llm : null
       },
       plan,
-      limits: { ...limits, maxClipSeconds: MAX_CLIP_SECONDS },
+      planState,
+      trialEndsAt: ctx.user?.trialEndsAt ?? null,
+      limits: {
+        sttSecondsPerMonth: limits.sttSecondsPerMonth,
+        llmTokensPerMonth: limits.llmTokensPerMonth,
+        requestsPerMinute: limits.requestsPerMinute,
+        maxClipSeconds: limits.maxClipSeconds
+      },
       usage: latest
         ? {
             period: latest.period,
@@ -69,85 +149,104 @@ export const status = authedQuery({
             llmTokens: latest.llmTokens,
             llmRequests: latest.llmRequests
           }
-        : { period: '', ...ZERO_USAGE }
+        : { period: '', ...ZERO_MONTH },
+      formattingPaused: false,
+      upgradeUrl: upgradeUrlFor(process.env, planState),
+      window: null,
+      meters: [],
+      resets: null
+    }
+    if (args.day === undefined) return base
+    const day = args.day
+    const snapshot: UsageSnapshot = ctx.user
+      ? await snapshotFor(ctx, ctx.user._id, day)
+      : { day, days: [], month: ZERO_MONTH }
+    const buckets = weekBuckets(day, snapshot.days)
+    const today = buckets[buckets.length - 1]
+    return {
+      ...base,
+      formattingPaused: formattingPaused(limits, snapshot.month),
+      window: {
+        day,
+        weekStart: buckets[0].day,
+        words: buckets.reduce((acc, b) => acc + b.words, 0),
+        sttSeconds: buckets.reduce((acc, b) => acc + b.sttSeconds, 0),
+        dictationsToday: Math.max(today.dictations, today.formats)
+      },
+      meters: metersFor(limits, snapshot),
+      resets: {
+        day: dayStart(day) + DAY_MS,
+        week: weekRollsAt(buckets),
+        month: nextMonthStart(day)
+      }
     }
   }
 })
 
 const authorizeResultValidator = v.union(
-  v.object({ ok: v.literal(true), userId: v.id('users'), plan: planValidator }),
+  v.object({
+    ok: v.literal(true),
+    userId: v.id('users'),
+    plan: planValidator,
+    planState: planStateValidator,
+    /** Set when the caller may proceed without the model (Pro past its soft fair-use cap). */
+    paused: v.union(meterValidator, v.null())
+  }),
   v.object({
     ok: v.literal(false),
-    status: v.number(),
-    code: v.union(v.literal('quota_exceeded'), v.literal('rate_limited'), v.literal('clip_too_long')),
-    message: v.string(),
-    retryAfterSec: v.optional(v.number())
+    plan: planValidator,
+    planState: planStateValidator,
+    refusal: refusalValidator
   })
 )
 
 /**
- * Gate one managed request. Provisions the account row if the Clerk webhook has not created it yet,
- * refuses when the month's allowance is spent or the account is asking too fast, and otherwise
- * counts the request against the rate window. Usage itself is added by `record` once the upstream
- * answered, so a failed request never costs allowance.
+ * Gate one managed request. Provisions the account row if the Clerk webhook has not created it yet
+ * (which also starts its trial), settles a trial that has run out, refuses when a limit of the
+ * tier is reached or the account is asking too fast, and otherwise counts the request against the
+ * rate window. Usage itself is added by `record` once the upstream answered, so a failed request
+ * never costs allowance.
  */
 export const authorize = internalMutation({
   args: {
     clerkId: v.string(),
     kind: inferenceKindValidator,
     /** Clip length for speech requests, so a request that cannot fit is refused up front. */
-    seconds: v.optional(v.number())
+    seconds: v.optional(v.number()),
+    /** The caller can answer with rule-based text instead of failing (/v1/format). */
+    degradable: v.optional(v.boolean())
   },
   returns: authorizeResultValidator,
   handler: async (ctx, args) => {
     const now = Date.now()
     const user = await upsertUser(ctx, args.clerkId, {}, now)
-    const plan: Plan = user.plan ?? DEFAULT_PLAN
+    const planState = planStateOf(user)
+    const plan = tierOf(planState)
     const limits = planLimits(plan)
+    const day = usageDay(now)
     const period = usagePeriod(now)
-    const usage = await usageFor(ctx, user._id, period)
-    const seconds = Math.max(0, args.seconds ?? 0)
+    const [snapshot, usage] = await Promise.all([
+      snapshotFor(ctx, user._id, day),
+      monthRow(ctx, user._id, period)
+    ])
+    const check = { plan, state: planState, limits, snapshot, now }
 
+    let paused: Meter | null = null
     if (args.kind === 'stt') {
-      if (seconds > MAX_CLIP_SECONDS) {
-        return {
-          ok: false as const,
-          status: 413,
-          code: 'clip_too_long' as const,
-          message: `Clips longer than ${Math.round(MAX_CLIP_SECONDS / 60)} minutes cannot be sent to Murmur's speech model`
-        }
-      }
-      const used = usage?.sttSeconds ?? 0
-      if (used >= limits.sttSecondsPerMonth || used + seconds > limits.sttSecondsPerMonth) {
-        return {
-          ok: false as const,
-          status: 429,
-          code: 'quota_exceeded' as const,
-          message: `This month's ${Math.round(limits.sttSecondsPerMonth / 60)} minutes of Murmur transcription on the ${plan} plan are used up`
-        }
-      }
-    } else if ((usage?.llmTokens ?? 0) >= limits.llmTokensPerMonth) {
-      return {
-        ok: false as const,
-        status: 429,
-        code: 'quota_exceeded' as const,
-        message: `This month's Murmur formatting allowance on the ${plan} plan is used up`
-      }
+      const refusal = checkTranscription(check, Math.max(0, args.seconds ?? 0))
+      if (refusal) return { ok: false as const, plan, planState, refusal }
+    } else {
+      const verdict = checkFormatting(check, args.degradable === true)
+      if (!verdict.ok) return { ok: false as const, plan, planState, refusal: verdict.refusal }
+      paused = verdict.paused
     }
 
     const windowFresh = usage?.windowStart !== undefined && now - usage.windowStart < RATE_WINDOW_MS
     const windowStart = windowFresh ? usage!.windowStart! : now
     const windowCount = windowFresh ? (usage!.windowCount ?? 0) : 0
-    if (windowCount >= limits.requestsPerMinute) {
-      const retryAfterSec = Math.max(1, Math.ceil((windowStart + RATE_WINDOW_MS - now) / 1000))
-      return {
-        ok: false as const,
-        status: 429,
-        code: 'rate_limited' as const,
-        message: `Too many requests; try again in ${retryAfterSec}s`,
-        retryAfterSec
-      }
-    }
+    const rate = checkRate(requestRateFor(limits, snapshot.month), windowStart, windowCount, now)
+    if (rate) return { ok: false as const, plan, planState, refusal: rate }
+
     if (usage) {
       await ctx.db.patch('inferenceUsage', usage._id, {
         windowStart,
@@ -158,31 +257,38 @@ export const authorize = internalMutation({
       await ctx.db.insert('inferenceUsage', {
         userId: user._id,
         period,
-        ...ZERO_USAGE,
+        ...ZERO_MONTH,
         windowStart,
         windowCount: 1,
         updatedAt: now
       })
     }
-    return { ok: true as const, userId: user._id, plan }
+    return { ok: true as const, userId: user._id, plan, planState, paused }
   }
 })
 
-/** Add what a successful upstream request consumed to the current month. */
+/** Add what a successful upstream request consumed to the current month and day. */
 export const record = internalMutation({
   args: {
     userId: v.id('users'),
     kind: inferenceKindValidator,
     seconds: v.optional(v.number()),
-    tokens: v.optional(v.number())
+    tokens: v.optional(v.number()),
+    /** Words in the transcript the speech model returned. */
+    words: v.optional(v.number())
   },
   returns: v.null(),
   handler: async (ctx, args) => {
     const now = Date.now()
     const period = usagePeriod(now)
-    const usage = await usageFor(ctx, args.userId, period)
+    const day = usageDay(now)
+    const [usage, [dayRow]] = await Promise.all([
+      monthRow(ctx, args.userId, period),
+      dayRows(ctx, args.userId, day, day)
+    ])
     const seconds = Math.max(0, args.seconds ?? 0)
     const tokens = Math.max(0, Math.floor(args.tokens ?? 0))
+    const words = Math.max(0, Math.floor(args.words ?? 0))
     const delta =
       args.kind === 'stt'
         ? { sttSeconds: (usage?.sttSeconds ?? 0) + seconds, sttRequests: (usage?.sttRequests ?? 0) + 1 }
@@ -193,8 +299,30 @@ export const record = internalMutation({
       await ctx.db.insert('inferenceUsage', {
         userId: args.userId,
         period,
-        ...ZERO_USAGE,
+        ...ZERO_MONTH,
         ...delta,
+        updatedAt: now
+      })
+    }
+    const dayDelta =
+      args.kind === 'stt'
+        ? {
+            words: (dayRow?.words ?? 0) + words,
+            sttSeconds: (dayRow?.sttSeconds ?? 0) + seconds,
+            dictations: (dayRow?.dictations ?? 0) + 1
+          }
+        : { formats: (dayRow?.formats ?? 0) + 1 }
+    if (dayRow) {
+      await ctx.db.patch('inferenceDays', dayRow._id, { ...dayDelta, updatedAt: now })
+    } else {
+      await ctx.db.insert('inferenceDays', {
+        userId: args.userId,
+        day,
+        words: 0,
+        sttSeconds: 0,
+        dictations: 0,
+        formats: 0,
+        ...dayDelta,
         updatedAt: now
       })
     }

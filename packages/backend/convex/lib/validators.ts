@@ -1,5 +1,6 @@
 import { v, type Infer } from 'convex/values'
-import { planValidator } from './plans'
+import { meterValidator } from './entitlements'
+import { billingIntervalValidator, planStateValidator, planValidator } from './plans'
 
 /**
  * Validators shared by the schema, the public function signatures and the tests. The wire shapes
@@ -229,14 +230,48 @@ export const historyEntryDtoValidator = v.object({
 })
 export type HistoryEntryDto = Infer<typeof historyEntryDtoValidator>
 
+/** Stripe's subscription statuses, as the webhook reports them. */
+export const subscriptionStatusValidator = v.union(
+  v.literal('active'),
+  v.literal('trialing'),
+  v.literal('past_due'),
+  v.literal('canceled'),
+  v.literal('unpaid'),
+  v.literal('incomplete'),
+  v.literal('incomplete_expired'),
+  v.literal('paused')
+)
+export type SubscriptionStatus = Infer<typeof subscriptionStatusValidator>
+
+/** The subscription snapshot kept on the user row; billing webhooks are its only writer. */
+export const subscriptionValidator = v.object({
+  /** Stripe subscription id (`sub_…`). */
+  id: v.string(),
+  status: subscriptionStatusValidator,
+  priceId: v.string(),
+  interval: billingIntervalValidator,
+  /** End of the paid period, epoch ms. */
+  currentPeriodEnd: v.number(),
+  cancelAtPeriodEnd: v.boolean(),
+  /** Last failed invoice, epoch ms; cleared when the subscription is active again. */
+  paymentFailedAt: v.optional(v.number()),
+  /** `created` of the Stripe event that produced this snapshot (ms); older events are ignored. */
+  eventAt: v.number()
+})
+export type Subscription = Infer<typeof subscriptionValidator>
+
 export const userDtoValidator = v.object({
   id: v.id('users'),
   clerkId: v.string(),
   email: v.optional(v.string()),
   name: v.optional(v.string()),
   imageUrl: v.optional(v.string()),
-  /** Account tier deciding the managed-inference allowance (see lib/plans.ts). */
+  /** Tier whose limits apply (see lib/plans.ts); `pro` during the trial. */
   plan: planValidator,
+  /** Where the account is in its lifecycle: trial, residual free tier or paid. */
+  planState: planStateValidator,
+  /** When the 14-day trial ends or ended, epoch ms. */
+  trialEndsAt: v.optional(v.number()),
   onboardingCompletedAt: v.optional(v.number()),
   onboardingVersion: v.optional(v.number()),
   createdAt: v.number()
@@ -253,7 +288,10 @@ export const inferenceStatusValidator = v.object({
     stt: v.union(v.string(), v.null()),
     llm: v.union(v.string(), v.null())
   }),
+  /** Tier whose limits apply; `pro` during the trial. */
   plan: planValidator,
+  planState: planStateValidator,
+  trialEndsAt: v.union(v.number(), v.null()),
   limits: v.object({
     sttSecondsPerMonth: v.number(),
     llmTokensPerMonth: v.number(),
@@ -267,6 +305,50 @@ export const inferenceStatusValidator = v.object({
     sttRequests: v.number(),
     llmTokens: v.number(),
     llmRequests: v.number()
-  })
+  }),
+  /** Pro past its soft fair-use cap: /v1/format answers with rule-based text. */
+  formattingPaused: v.boolean(),
+  upgradeUrl: v.union(v.string(), v.null()),
+  /** The rolling week and the day the client asked about; null without a `day` argument. */
+  window: v.union(
+    v.object({
+      day: v.string(),
+      weekStart: v.string(),
+      words: v.number(),
+      sttSeconds: v.number(),
+      dictationsToday: v.number()
+    }),
+    v.null()
+  ),
+  /** Every limit that applies to the tier and where it stands; empty without a `day` argument. */
+  meters: v.array(meterValidator),
+  resets: v.union(
+    v.object({
+      day: v.number(),
+      week: v.union(v.number(), v.null()),
+      month: v.number()
+    }),
+    v.null()
+  )
 })
 export type InferenceStatus = Infer<typeof inferenceStatusValidator>
+
+/** The account's billing state as the web account page shows it. */
+export const billingStatusValidator = v.object({
+  /** Stripe keys and both prices are set on the deployment. */
+  configured: v.boolean(),
+  /** The account has a Stripe customer, so the Customer Portal can open. */
+  portalAvailable: v.boolean(),
+  upgradeUrl: v.union(v.string(), v.null()),
+  subscription: v.union(
+    v.object({
+      status: subscriptionStatusValidator,
+      interval: billingIntervalValidator,
+      currentPeriodEnd: v.number(),
+      cancelAtPeriodEnd: v.boolean(),
+      paymentFailedAt: v.union(v.number(), v.null())
+    }),
+    v.null()
+  )
+})
+export type BillingStatus = Infer<typeof billingStatusValidator>

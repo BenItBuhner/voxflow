@@ -9,6 +9,8 @@ import {
   clipSeconds,
   describeUpstreamFailure,
   gatewayError,
+  limitDetail,
+  limitError,
   modelsPayload,
   multipartBoundary,
   parseFormatRequest,
@@ -16,6 +18,7 @@ import {
   readUpstreams,
   subjectOf,
   tokensUsed,
+  transcriptWords,
   upstreamModelFor,
   wavInfo,
   type MultipartFile,
@@ -44,10 +47,6 @@ function modelNotFound(requested: string, available: string): Response {
     'model_not_found',
     `Unknown model "${requested}". Available models: ${available}`
   )
-}
-
-function retryHeaders(retryAfterSec: number | undefined): Record<string, string> {
-  return retryAfterSec ? { 'retry-after': String(retryAfterSec) } : {}
 }
 
 export const models = httpAction(async (ctx) => {
@@ -96,7 +95,7 @@ export const transcriptions = httpAction(async (ctx, request) => {
     kind: 'stt',
     seconds
   })
-  if (!gate.ok) return gatewayError(gate.status, gate.code, gate.message, retryHeaders(gate.retryAfterSec))
+  if (!gate.ok) return limitError(gate.refusal, gate.plan, gate.planState, process.env)
 
   const form = new FormData()
   form.append(
@@ -133,12 +132,13 @@ export const transcriptions = httpAction(async (ctx, request) => {
   }
   const measured = wavInfo(file.data)?.durationSec
   const billed = measured ?? (typeof json?.duration === 'number' ? json.duration : seconds)
-  await ctx.runMutation(internal.inference.record, { userId: gate.userId, kind: 'stt', seconds: billed })
-  console.log(`[gateway] stt plan=${gate.plan} seconds=${billed.toFixed(1)} upstreamMs=${Date.now() - started}`)
-  return new Response(text, {
-    status: 200,
-    headers: { 'content-type': res.headers.get('content-type') ?? 'application/json' }
-  })
+  const upstreamType = res.headers.get('content-type') ?? 'application/json'
+  const words = transcriptWords(text, upstreamType)
+  await ctx.runMutation(internal.inference.record, { userId: gate.userId, kind: 'stt', seconds: billed, words })
+  console.log(
+    `[gateway] stt plan=${gate.plan} seconds=${billed.toFixed(1)} words=${words} upstreamMs=${Date.now() - started}`
+  )
+  return new Response(text, { status: 200, headers: { 'content-type': upstreamType } })
 })
 
 /** Chat parameters a client may set; anything else (tools, n, streaming) is dropped. */
@@ -173,7 +173,7 @@ export const chatCompletions = httpAction(async (ctx, request) => {
     return gatewayError(400, 'bad_request', '"messages" must be a non-empty array')
 
   const gate = await ctx.runMutation(internal.inference.authorize, { clerkId: identity.subject, kind: 'llm' })
-  if (!gate.ok) return gatewayError(gate.status, gate.code, gate.message, retryHeaders(gate.retryAfterSec))
+  if (!gate.ok) return limitError(gate.refusal, gate.plan, gate.planState, process.env)
 
   const outbound: Record<string, unknown> = { model: upstreamModelFor(upstream, gate.plan), stream: false }
   for (const key of CHAT_PASSTHROUGH) if (input[key] !== undefined) outbound[key] = input[key]
@@ -240,8 +240,12 @@ export const format = httpAction(async (ctx, request) => {
   const parsed = parseFormatRequest(input)
   if (!parsed.ok) return gatewayError(400, 'bad_request', parsed.message)
 
-  const gate = await ctx.runMutation(internal.inference.authorize, { clerkId: identity.subject, kind: 'llm' })
-  if (!gate.ok) return gatewayError(gate.status, gate.code, gate.message, retryHeaders(gate.retryAfterSec))
+  const gate = await ctx.runMutation(internal.inference.authorize, {
+    clerkId: identity.subject,
+    kind: 'llm',
+    degradable: true
+  })
+  if (!gate.ok) return limitError(gate.refusal, gate.plan, gate.planState, process.env)
 
   const model = upstreamModelFor(upstream, gate.plan)
   let tokens = 0
@@ -253,15 +257,24 @@ export const format = httpAction(async (ctx, request) => {
     tokens += res.tokens
     return res.result
   }
+  // Past Pro's soft fair-use cap the engine runs without a model: rule-based text, never an error.
   const formatted = await formatTranscript(
     { transcript: parsed.request.transcript, mode: 'smart', context: parsed.request.context },
-    complete
+    gate.paused ? null : complete
   )
   if (calls > 0) await ctx.runMutation(internal.inference.record, { userId: gate.userId, kind: 'llm', tokens })
   console.log(
-    `[gateway] format plan=${gate.plan} outcome=${formatted.status.outcome} attempts=${formatted.status.attempts} tokens=${tokens} ms=${Date.now() - started}`
+    `[gateway] format plan=${gate.plan} outcome=${formatted.status.outcome} attempts=${formatted.status.attempts} tokens=${tokens} paused=${gate.paused !== null} ms=${Date.now() - started}`
   )
-  return new Response(JSON.stringify({ ...formatted, model: MURMUR_MODELS.llm }), { status: 200, headers: JSON_HEADERS })
+  const body = gate.paused
+    ? {
+        ...formatted,
+        status: { ...formatted.status, detail: 'fair use' },
+        limit: limitDetail(gate.paused, gate.plan, gate.planState, process.env),
+        model: MURMUR_MODELS.llm
+      }
+    : { ...formatted, model: MURMUR_MODELS.llm }
+  return new Response(JSON.stringify(body), { status: 200, headers: JSON_HEADERS })
 })
 
 class UpstreamError extends Error {
