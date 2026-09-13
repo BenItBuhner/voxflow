@@ -19,12 +19,13 @@ import { ModelField, SecretInput, TestResult } from '@renderer/components/Provid
 import { LanguageSelect } from '@renderer/components/LanguageSelect'
 import {
   minutesLabel,
-  planLabel,
+  planTitle,
   useInference,
   type InferenceView
 } from '@renderer/hooks/useInference'
 import { useSettings } from '@renderer/hooks/useSettings'
 import { cn } from '@renderer/lib/utils'
+import { planStateLabel } from '@shared/limits'
 
 export function ProvidersPage({
   embedded,
@@ -112,7 +113,7 @@ export function ProvidersPage({
               {inference.status?.models.stt && (
                 <Badge variant="outline">{inference.status.models.stt}</Badge>
               )}
-              <Badge variant="success">{planLabel(inference.plan)} plan</Badge>
+              <Badge variant="success">{planTitle(inference.planState)}</Badge>
             </>
           ) : (
             <>
@@ -151,8 +152,8 @@ function SourceChooser({
         'Included with your account. Nothing to set up: your recording goes to this Murmur instance, which transcribes and formats it with the models it provides.',
       icon: <Cloud />,
       meta: inference.minutes
-        ? `${planLabel(inference.plan)} plan · ${minutesLabel(inference.minutes)}`
-        : `${planLabel(inference.plan)} plan`
+        ? `${planTitle(inference.planState)} · ${minutesLabel(inference.minutes)}`
+        : planTitle(inference.planState)
     },
     {
       value: 'custom',
@@ -235,7 +236,7 @@ function MurmurSpeechSection({
       >
         <div className="flex w-full items-center gap-3">
           <Badge variant={inference.plan === 'pro' ? 'success' : 'secondary'}>
-            {planLabel(inference.plan)}
+            {planStateLabel(inference.planState)}
           </Badge>
           {minutes && (
             <>

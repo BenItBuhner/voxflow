@@ -9,9 +9,10 @@ import { KeyCaps, platformFor } from '@renderer/components/KeyCaps'
 import { Appear, CountUp, Rolling, arrive, item, leave, list } from '@renderer/components/motion'
 import { UpdateBanner } from '@renderer/components/Updates'
 import { useCloud } from '@renderer/hooks/useCloud'
-import { useInference } from '@renderer/hooks/useInference'
+import { useInference, type InferenceView } from '@renderer/hooks/useInference'
 import { useSettings } from '@renderer/hooks/useSettings'
 import { formatDuration, formatNumber, formatRelative } from '@renderer/lib/utils'
+import { formatResetTime, meterValue } from '@shared/limits'
 import type { Route } from '@renderer/components/Shell'
 
 const TYPING_WPM = 40
@@ -74,6 +75,7 @@ export function HomePage({
           <p className="mt-2.5 text-lead text-muted-foreground">
             Click into any text field, hold your shortcut, speak, let go.
           </p>
+          <PlanLine inference={inference} onOpen={() => onNavigate('account')} />
         </div>
         <Badge
           variant={
@@ -260,6 +262,45 @@ export function HomePage({
         </section>
       </Appear>
     </div>
+  )
+}
+
+/**
+ * Where the account stands, in one quiet line under the greeting: the trial's days, the free week's
+ * words, a paused formatting model. Nothing when there is nothing to say; never a banner.
+ */
+function PlanLine({
+  inference,
+  onOpen
+}: {
+  inference: InferenceView
+  onOpen: () => void
+}): React.JSX.Element | null {
+  if (!inference.offersMurmur || !inference.signedIn || !inference.status) return null
+  if (inference.routing.stt !== 'murmur' && inference.planState !== 'trial') return null
+  let text: string | null = null
+  if (inference.planState === 'trial') {
+    const days = inference.trialDaysLeft
+    text = `Pro trial · ${days === 1 ? 'last day' : `${days} days left`}`
+  } else if (inference.planState === 'free') {
+    const words = inference.meters.find((m) => m.limit === 'wordsPerWeek')
+    if (words)
+      text = words.exceeded
+        ? `Free plan · this week's words are used up · more ${formatResetTime(words.resetsAt)}`
+        : `Free plan · ${meterValue(words)} this week`
+  } else if (inference.formattingPaused) {
+    const paused = inference.meters.find((m) => m.limit === 'fairUseSttSecondsPerMonth')
+    text = `Pro · formatting paused${paused ? ` until ${formatResetTime(paused.resetsAt).replace(/^on /, '')}` : ''} (fair use)`
+  }
+  if (!text) return null
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="mt-3 -ml-1 rounded-full px-1 text-meta text-muted-foreground transition-colors hover:text-foreground"
+    >
+      {text}
+    </button>
   )
 }
 

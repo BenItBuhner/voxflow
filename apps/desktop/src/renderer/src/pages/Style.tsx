@@ -18,7 +18,7 @@ import {
 import { Badge, Segmented } from '@renderer/components/ui/misc'
 import { PageHeader, Section, SettingRow } from '@renderer/components/SettingRow'
 import { ModelField, SecretInput, TestResult } from '@renderer/components/ProviderForm'
-import { planLabel, useInference } from '@renderer/hooks/useInference'
+import { planTitle, useInference } from '@renderer/hooks/useInference'
 import { useSettings } from '@renderer/hooks/useSettings'
 import { cn, uid } from '@renderer/lib/utils'
 
@@ -259,7 +259,7 @@ export function StylePage(): React.JSX.Element {
             title="Model"
             description={
               inference.signedIn
-                ? `Provided by this Murmur instance on the ${planLabel(inference.plan)} plan.`
+                ? `Provided by this Murmur instance on your ${planTitle(inference.planState)}.`
                 : 'Sign in to use Murmur models.'
             }
           >
