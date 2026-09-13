@@ -94,19 +94,6 @@ export function trialDaysLeft(trialEndsAt: number | null | undefined, now = Date
   return Math.max(0, Math.ceil((trialEndsAt - now) / 86_400_000))
 }
 
-/** The web account page behind an upgrade link (the same page without the `upgrade` query). */
-export function accountUrlFrom(upgradeUrl: string | null | undefined): string | null {
-  if (!upgradeUrl) return null
-  try {
-    const url = new URL(upgradeUrl)
-    url.search = ''
-    url.hash = ''
-    return url.toString()
-  } catch {
-    return null
-  }
-}
-
 // ---- wording --------------------------------------------------------------------------------
 
 const MINUTE = 60_000
@@ -151,6 +138,16 @@ function formatCount(n: number): string {
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(n)
 }
 
+/** Token counts read in thousands and millions: "12k", "500k", "2.1M", "25M". */
+export function compactCount(n: number): string {
+  if (n >= 1_000_000) {
+    const m = n / 1_000_000
+    return `${m >= 10 || Number.isInteger(m) ? Math.round(m) : m.toFixed(1)}M`
+  }
+  if (n >= 10_000) return `${Math.round(n / 1000)}k`
+  return formatCount(n)
+}
+
 /** Seconds of audio as a figure in the unit the allowance is naturally read in: minutes, or hours from 3 h up. */
 function audioFigure(seconds: number, allowedSeconds: number): { value: string; unit: string } {
   const hours = allowedSeconds >= 3 * 3600 && allowedSeconds % 3600 === 0
@@ -179,7 +176,7 @@ export function meterValue(meter: Pick<UsageMeter, 'limit' | 'used' | 'allowed'>
     case 'fairUseSttSecondsPerMonth':
       return `${audioFigure(meter.used, meter.allowed).value} of ${formatAudioSeconds(meter.allowed)}`
     case 'llmTokensPerMonth':
-      return `${formatCount(meter.used)} of ${formatCount(meter.allowed)} tokens`
+      return `${compactCount(meter.used)} of ${compactCount(meter.allowed)} tokens`
     case 'maxClipSeconds':
       return `up to ${formatAudioSeconds(meter.allowed)} a clip`
     default:
@@ -292,7 +289,7 @@ export function describeLimit(
         title: unformatted
           ? "Inserted without formatting: this month's formatting allowance is used up"
           : "This month's formatting allowance is used up",
-        detail: `${formatCount(notice.allowed)} tokens a month ${tier}${resets}`,
+        detail: `${compactCount(notice.allowed)} tokens a month ${tier}${resets}`,
         upgradeHelps: !pro
       }
     default:

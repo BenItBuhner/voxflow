@@ -150,7 +150,7 @@ fun planDescription(inference: InferenceView): String {
         "pro" -> if (inference.formattingPaused)
             "Unlimited dictation within fair use. The formatting model is paused for the rest of this month; your text is still transcribed and tidied by rules."
         else
-            "Unlimited dictation within fair use: the meters below show how far this month has come. Manage the subscription from your account page."
+            "Unlimited dictation within fair use: the meters below show how far this month has come."
         else -> "A weekly allowance of free words and speech, a handful of dictations a day, clips up to a minute. Upgrade for unlimited dictation, or connect your own provider under Speech model."
     }
 }
@@ -158,7 +158,7 @@ fun planDescription(inference: InferenceView): String {
 /**
  * The account's plan: where it stands (trial, free, Pro), how much of each allowance is used and
  * when it comes back, and the one action that changes it. Upgrade opens the web account page in
- * the browser; the button is only shown when the instance has one.
+ * the browser; the instance sends that link only while an upgrade applies, so Pro sees no button.
  */
 @Composable
 fun PlanGroup(inference: InferenceView) {
@@ -220,10 +220,9 @@ fun PlanGroup(inference: InferenceView) {
                 Text(inference.minutesLabel ?: "", style = Murmur.type.labelSmall, color = c.inkSoft)
             }
         }
-        if (upgrade != null || (inference.planState == "pro" && inference.accountUrl != null)) {
-            Row(Modifier.padding(top = 4.dp, bottom = Space.row), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (upgrade != null) PrimaryButton("Upgrade", onClick = { open(upgrade) })
-                else SecondaryButton("Manage plan", onClick = { open(inference.accountUrl) })
+        if (upgrade != null) {
+            Row(Modifier.padding(top = 4.dp, bottom = Space.row)) {
+                PrimaryButton("Upgrade", onClick = { open(upgrade) })
             }
         }
     }

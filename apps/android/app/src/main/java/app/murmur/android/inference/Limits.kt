@@ -4,7 +4,6 @@ import app.murmur.android.cloud.InferenceStatusDto
 import app.murmur.android.cloud.UsageMeterDto
 import app.murmur.android.cloud.UserDto
 import org.json.JSONObject
-import java.net.URI
 import java.util.Calendar
 import java.util.Locale
 import kotlin.math.ceil
@@ -101,18 +100,6 @@ object Limits {
         return ceil((trialEndsAt - now) / DAY).toInt().coerceAtLeast(0)
     }
 
-    /** The web account page behind an upgrade link (the same page without the query). */
-    fun accountUrlFrom(upgradeUrl: String?): String? {
-        if (upgradeUrl.isNullOrBlank()) return null
-        return try {
-            val u = URI(upgradeUrl)
-            if (u.scheme == null || u.host == null) return null
-            URI(u.scheme, u.authority, u.path, null, null).toString()
-        } catch (_: Exception) {
-            null
-        }
-    }
-
     private fun clockTime(cal: Calendar): String {
         val h = cal.get(Calendar.HOUR_OF_DAY)
         val hour = if (h % 12 == 0) 12 else h % 12
@@ -141,6 +128,16 @@ object Limits {
 
     fun formatCount(n: Double): String = "%,d".format(Locale.US, n.roundToInt())
 
+    /** Token counts read in thousands and millions: "12k", "500k", "2.1M", "25M". */
+    fun compactCount(n: Double): String = when {
+        n >= 1_000_000 -> {
+            val m = n / 1_000_000
+            if (m >= 10 || m == Math.floor(m)) "${m.roundToInt()}M" else "%.1fM".format(Locale.US, m)
+        }
+        n >= 10_000 -> "${(n / 1000).roundToInt()}k"
+        else -> formatCount(n)
+    }
+
     private fun audioFigure(seconds: Double, allowedSeconds: Double): Pair<String, String> {
         val hours = allowedSeconds >= 3 * 3600 && allowedSeconds % 3600.0 == 0.0
         if (hours) {
@@ -163,7 +160,7 @@ object Limits {
         "wordsPerWeek" -> "${formatCount(used)} of ${formatCount(allowed)} words"
         "sttSecondsPerWeek", "sttSecondsPerMonth", "fairUseSttSecondsPerMonth" ->
             "${audioFigure(used, allowed).first} of ${formatAudioSeconds(allowed)}"
-        "llmTokensPerMonth" -> "${formatCount(used)} of ${formatCount(allowed)} tokens"
+        "llmTokensPerMonth" -> "${compactCount(used)} of ${compactCount(allowed)} tokens"
         "maxClipSeconds" -> "up to ${formatAudioSeconds(allowed)} a clip"
         else -> "${formatCount(used)} of ${formatCount(allowed)}"
     }
@@ -231,7 +228,7 @@ object Limits {
             )
             "llmTokensPerMonth" -> LimitCopy(
                 if (unformatted) "Inserted without formatting: this month's formatting allowance is used up" else "This month's formatting allowance is used up",
-                "${formatCount(notice.allowed)} tokens a month $tier$resets",
+                "${compactCount(notice.allowed)} tokens a month $tier$resets",
                 !pro
             )
             else -> LimitCopy(

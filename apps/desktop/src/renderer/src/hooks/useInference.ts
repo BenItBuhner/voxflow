@@ -13,13 +13,7 @@ import {
   sttConfigured,
   type InferenceRouting
 } from '@shared/inference'
-import {
-  accountUrlFrom,
-  planStateLabel,
-  planStateOf,
-  trialDaysLeft,
-  usageMeters
-} from '@shared/limits'
+import { meterValue, planStateLabel, planStateOf, trialDaysLeft, usageMeters } from '@shared/limits'
 import { useCloud } from './useCloud'
 import { useSettings } from './useSettings'
 
@@ -43,8 +37,6 @@ export interface InferenceView {
   resets: UsageResets | null
   /** The web page that starts an upgrade, or null when the instance offers none (hide the button). */
   upgradeUrl: string | null
-  /** The web account page (plan, invoices, cancellation), derived from the upgrade link. */
-  accountUrl: string | null
   /** Pro past the soft fair-use cap: the formatting model is paused until the month resets. */
   formattingPaused: boolean
   /** Speech / formatting are ready to use for the resolved sources. */
@@ -85,7 +77,6 @@ export function useInference(): InferenceView {
       meters: usageMeters(status?.meters),
       resets: status?.resets ?? null,
       upgradeUrl,
-      accountUrl: accountUrlFrom(upgradeUrl),
       formattingPaused: status?.formattingPaused ?? false,
       sttReady: sttConfigured(settings, routing, signedIn),
       llmReady: llmConfigured(settings, routing, signedIn),
@@ -106,8 +97,9 @@ export function planTitle(state: PlanState): string {
   return state === 'trial' ? 'Pro trial' : `${planStateLabel(state)} plan`
 }
 
-/** "12 of 120 min" style summary of the month's managed transcription. */
+/** "12 of 120 min" (or "1.5 of 60 h") summary of the month's managed transcription. */
 export function minutesLabel(minutes: { used: number; limit: number }): string {
-  const used = minutes.used < 1 && minutes.used > 0 ? '<1' : Math.round(minutes.used).toString()
-  return `${used} of ${Math.round(minutes.limit)} min this month`
+  const allowed = Math.round(minutes.limit) * 60
+  const used = Math.round(minutes.used * 60)
+  return `${meterValue({ limit: 'sttSecondsPerMonth', used, allowed })} this month`
 }

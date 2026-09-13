@@ -168,7 +168,9 @@ class LimitsTest {
         assertEquals("312 of 500 words", Limits.meterValue("wordsPerWeek", 312.0, 500.0))
         assertEquals("2 of 7 min", Limits.meterValue("sttSecondsPerWeek", 95.0, 420.0))
         assertEquals("3 of 12", Limits.meterValue("dictationsPerDay", 3.0, 12.0))
-        assertEquals("12,400 of 500,000 tokens", Limits.meterValue("llmTokensPerMonth", 12_400.0, 500_000.0))
+        assertEquals("12k of 500k tokens", Limits.meterValue("llmTokensPerMonth", 12_400.0, 500_000.0))
+        assertEquals("2.1M of 25M tokens", Limits.meterValue("llmTokensPerMonth", 2_100_000.0, 25_000_000.0))
+        assertEquals("980 of 500k tokens", Limits.meterValue("llmTokensPerMonth", 980.0, 500_000.0))
         assertEquals("Words this week", Limits.meterLabel("wordsPerWeek"))
         val meters = listOf(
             UsageMeterDto("wordsPerWeek", 312.0, 500.0),
@@ -194,9 +196,6 @@ class LimitsTest {
         assertEquals(1, Limits.trialDaysLeft((NOW + 1).toDouble(), NOW))
         assertEquals(0, Limits.trialDaysLeft((NOW - 5).toDouble(), NOW))
         assertEquals(0, Limits.trialDaysLeft(null, NOW))
-        assertEquals("https://murmur.app/account", Limits.accountUrlFrom(UPGRADE))
-        assertNull(Limits.accountUrlFrom(null))
-        assertNull(Limits.accountUrlFrom("nope"))
     }
 
     @Test

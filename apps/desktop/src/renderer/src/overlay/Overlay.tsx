@@ -10,8 +10,8 @@ const IDLE_WIDTH = 56
 const IDLE_HEIGHT = 6
 const PILL_HEIGHT = 44
 const PILL_PAD_X = 16
-/** The limit notice: two lines and its buttons, at the sheet radius rather than a capsule. */
-const LIMIT_HEIGHT = 84
+/** The limit notice: two lines and a row of buttons, at the sheet radius rather than a capsule. */
+const LIMIT_HEIGHT = 112
 const LIMIT_PAD_X = 20
 /** How long an outgoing layer keeps fading; must cover `overlay-layer-out` in globals.css. */
 const LEAVE_MS = 240
@@ -217,7 +217,7 @@ export function Overlay({
               ref={layer.leaving ? undefined : contentRef}
               className={cn(
                 'flex items-center gap-3 whitespace-nowrap',
-                isLimitStop(layer.leaving ? layer.state : state) ? 'h-[84px]' : 'h-11'
+                isLimitStop(layer.leaving ? layer.state : state) ? 'h-[112px]' : 'h-11'
               )}
             >
               <Contents
@@ -416,7 +416,7 @@ function LimitStop({
     'bg-overlay-foreground/15 text-overlay-foreground hover:bg-overlay-foreground/28 active:bg-overlay-foreground/35'
   )
   return (
-    <div className="flex w-[520px] max-w-[520px] flex-col gap-2 whitespace-nowrap">
+    <div className="flex w-[520px] max-w-[520px] flex-col whitespace-nowrap">
       <div className="flex items-center gap-3">
         <LimitIcon />
         <span className="min-w-0 flex-1 truncate" title={limit.message}>
@@ -432,13 +432,13 @@ function LimitStop({
           <CloseIcon />
         </button>
       </div>
-      <div className="flex items-center gap-2 pl-7">
-        <span
-          className="min-w-0 flex-1 truncate text-meta font-normal text-overlay-foreground/65"
-          title={copy.detail}
-        >
-          {copy.detail}
-        </span>
+      <span
+        className="mt-0.5 min-w-0 truncate pl-7 text-meta font-normal text-overlay-foreground/65"
+        title={copy.detail}
+      >
+        {copy.detail}
+      </span>
+      <div className="mt-3 flex items-center justify-end gap-2">
         {upgrade && (
           <button
             type="button"

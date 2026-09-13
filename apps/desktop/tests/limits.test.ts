@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { errorFromResponse, parseErrorBody } from '@core/stt'
 import { currentUtcDay, msUntilNextUtcDay, type UsageMeter } from '@shared/cloud'
 import {
-  accountUrlFrom,
   describeLimit,
   formatAudioSeconds,
   formatResetTime,
@@ -215,7 +214,13 @@ describe('limit wording', () => {
     expect(meterValue(meters[1])).toBe('2 of 7 min')
     expect(meterValue(meters[2])).toBe('3 of 12')
     expect(meterValue(meters[3])).toBe('up to 1 min a clip')
-    expect(meterValue(meters[5])).toBe('12,400 of 500,000 tokens')
+    expect(meterValue(meters[5])).toBe('12k of 500k tokens')
+    expect(meterValue({ limit: 'llmTokensPerMonth', used: 2_100_000, allowed: 25_000_000 })).toBe(
+      '2.1M of 25M tokens'
+    )
+    expect(meterValue({ limit: 'llmTokensPerMonth', used: 980, allowed: 500_000 })).toBe(
+      '980 of 500k tokens'
+    )
     expect(meterLabel('wordsPerWeek')).toBe('Words this week')
     expect(meterLabel('fairUseSttSecondsPerMonth')).toBe('Fair use this month')
     // Per-request limits are not usage; they get no row.
@@ -248,12 +253,6 @@ describe('plan state', () => {
     expect(trialDaysLeft(NOW - 5, NOW)).toBe(0)
     expect(trialDaysLeft(null, NOW)).toBe(0)
     expect(trialDaysLeft(undefined, NOW)).toBe(0)
-  })
-
-  it('finds the account page behind an upgrade link', () => {
-    expect(accountUrlFrom(UPGRADE)).toBe('https://murmur.app/account')
-    expect(accountUrlFrom(null)).toBeNull()
-    expect(accountUrlFrom('nope')).toBeNull()
   })
 
   it('knows the UTC day the status is asked for and when it turns', () => {

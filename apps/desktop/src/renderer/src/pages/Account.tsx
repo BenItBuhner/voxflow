@@ -329,7 +329,7 @@ function planDescription(inference: InferenceView): string {
     case 'pro':
       return inference.formattingPaused
         ? 'Unlimited dictation within fair use. The formatting model is paused for the rest of this month; your text is still transcribed and tidied by rules.'
-        : 'Unlimited dictation within fair use: the meters below show how far this month has come. Manage the subscription from your account page.'
+        : 'Unlimited dictation within fair use: the meters below show how far this month has come.'
     default:
       return 'A weekly allowance of free words and speech, a handful of dictations a day, clips up to a minute. Upgrade for unlimited dictation, or connect your own provider under Models.'
   }
@@ -338,7 +338,7 @@ function planDescription(inference: InferenceView): string {
 /**
  * The account's plan: where it stands (trial, free, Pro), how much of each allowance is used and
  * when it comes back, and the one action that changes it. Upgrade opens the web account page; the
- * button is only shown when the instance has one.
+ * instance sends that link only while an upgrade applies, so Pro sees no button.
  */
 function PlanSection({ inference }: { inference: InferenceView }): React.JSX.Element {
   const open = (url: string | null): void => {
@@ -372,11 +372,6 @@ function PlanSection({ inference }: { inference: InferenceView }): React.JSX.Ele
         {upgrade && (
           <Button size="sm" onClick={() => open(upgrade)}>
             <Sparkles /> Upgrade
-          </Button>
-        )}
-        {inference.planState === 'pro' && inference.accountUrl && (
-          <Button variant="outline" size="sm" onClick={() => open(inference.accountUrl)}>
-            <Settings2 /> Manage plan
           </Button>
         )}
       </SettingRow>

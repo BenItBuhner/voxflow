@@ -54,20 +54,15 @@ data class InferenceView(
     /** The web page that starts an upgrade, or null when the instance offers none (hide the button). */
     val upgradeUrl: String? get() = status?.upgradeUrl
 
-    /** The web account page (plan, invoices, cancellation), derived from the upgrade link. */
-    val accountUrl: String? get() = Limits.accountUrlFrom(upgradeUrl)
-
     /** Pro past the soft fair-use cap: the formatting model is paused until the month resets. */
     val formattingPaused: Boolean get() = status?.formattingPaused == true
 
-    /** "12 of 120 min this month", or null before the account status arrived. */
+    /** "12 of 120 min this month" (or "1.5 of 60 h this month"), or null before the account status arrived. */
     val minutesLabel: String?
         get() {
             val s = status ?: return null
-            val used = s.sttSecondsIn(InferenceStatusDto.currentPeriod()) / 60.0
-            val limit = s.limits.sttSecondsPerMonth / 60.0
-            val shown = if (used > 0 && used < 1) "<1" else Math.round(used).toString()
-            return "$shown of ${Math.round(limit)} min this month"
+            val used = s.sttSecondsIn(InferenceStatusDto.currentPeriod())
+            return "${Limits.meterValue("sttSecondsPerMonth", used, s.limits.sttSecondsPerMonth)} this month"
         }
 }
 
