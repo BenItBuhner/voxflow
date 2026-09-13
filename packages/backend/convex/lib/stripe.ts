@@ -110,7 +110,10 @@ export async function stripeRequest<T>(
   }
   if (!res.ok) {
     const error = (json as { error?: { message?: string } }).error
-    throw new StripeApiError(error?.message ?? `Stripe request failed (HTTP ${res.status})`, res.status)
+    throw new StripeApiError(
+      error?.message ?? `Stripe request failed (HTTP ${res.status})`,
+      res.status
+    )
   }
   return json as T
 }
@@ -160,7 +163,9 @@ export async function verifyStripeSignature(
     false,
     ['sign']
   )
-  const expected = hex(await crypto.subtle.sign('HMAC', key, encoder.encode(`${timestamp}.${payload}`)))
+  const expected = hex(
+    await crypto.subtle.sign('HMAC', key, encoder.encode(`${timestamp}.${payload}`))
+  )
   if (!signatures.some((sig) => timingSafeEqual(sig, expected)))
     throw new StripeSignatureError('Signature does not match')
 }
@@ -276,7 +281,10 @@ interface StripeEventPayload {
 }
 
 /** The events Murmur acts on, reduced to what the mutations need. `created` is in ms. */
-export function parseStripeEvent(body: unknown, prices?: Record<BillingInterval, string>): StripeEvent {
+export function parseStripeEvent(
+  body: unknown,
+  prices?: Record<BillingInterval, string>
+): StripeEvent {
   const event = (body ?? {}) as StripeEventPayload
   const type = event.type ?? ''
   const id = event.id ?? ''
@@ -292,7 +300,8 @@ export function parseStripeEvent(body: unknown, prices?: Record<BillingInterval,
         client_reference_id?: string | null
         metadata?: Record<string, string>
       }
-      if (session.mode !== 'subscription') return { type: 'ignored', eventType: type, reason: 'not a subscription' }
+      if (session.mode !== 'subscription')
+        return { type: 'ignored', eventType: type, reason: 'not a subscription' }
       return {
         type,
         id,
@@ -305,7 +314,8 @@ export function parseStripeEvent(body: unknown, prices?: Record<BillingInterval,
     case 'customer.subscription.updated':
     case 'customer.subscription.deleted': {
       const subscription = subscriptionSnapshot(object, prices)
-      if (!subscription) return { type: 'ignored', eventType: type, reason: 'unreadable subscription' }
+      if (!subscription)
+        return { type: 'ignored', eventType: type, reason: 'unreadable subscription' }
       return { type, id, created, subscription }
     }
     case 'invoice.payment_failed': {
@@ -319,7 +329,8 @@ export function parseStripeEvent(body: unknown, prices?: Record<BillingInterval,
         id,
         created,
         customerId: idOf(invoice.customer),
-        subscriptionId: idOf(invoice.subscription) ?? idOf(invoice.parent?.subscription_details?.subscription)
+        subscriptionId:
+          idOf(invoice.subscription) ?? idOf(invoice.parent?.subscription_details?.subscription)
       }
     }
     default:

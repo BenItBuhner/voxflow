@@ -61,7 +61,12 @@ export interface MonthUsage {
   llmRequests: number
 }
 
-export const ZERO_MONTH: MonthUsage = { sttSeconds: 0, sttRequests: 0, llmTokens: 0, llmRequests: 0 }
+export const ZERO_MONTH: MonthUsage = {
+  sttSeconds: 0,
+  sttRequests: 0,
+  llmTokens: 0,
+  llmRequests: 0
+}
 
 export interface UsageSnapshot {
   /** The UTC day the snapshot is anchored on. */
@@ -166,15 +171,20 @@ export function metersFor(limits: PlanLimits, snapshot: UsageSnapshot): Meter[] 
       )
     )
   }
-  out.push(meter('sttSecondsPerMonth', snapshot.month.sttSeconds, limits.sttSecondsPerMonth, monthReset))
-  out.push(meter('llmTokensPerMonth', snapshot.month.llmTokens, limits.llmTokensPerMonth, monthReset))
+  out.push(
+    meter('sttSecondsPerMonth', snapshot.month.sttSeconds, limits.sttSecondsPerMonth, monthReset)
+  )
+  out.push(
+    meter('llmTokensPerMonth', snapshot.month.llmTokens, limits.llmTokensPerMonth, monthReset)
+  )
   return out
 }
 
 /** Pro past its soft fair-use cap: the formatting model pauses and the request rate drops. */
 export function formattingPaused(limits: PlanLimits, month: MonthUsage): boolean {
   return (
-    limits.fairUseSttSecondsPerMonth !== null && month.sttSeconds >= limits.fairUseSttSecondsPerMonth
+    limits.fairUseSttSecondsPerMonth !== null &&
+    month.sttSeconds >= limits.fairUseSttSecondsPerMonth
   )
 }
 
@@ -296,9 +306,7 @@ export function checkTranscription(check: RequestCheck, clipSeconds: number): Re
   return null
 }
 
-export type FormattingCheck =
-  | { ok: true; paused: Meter | null }
-  | { ok: false; refusal: Refusal }
+export type FormattingCheck = { ok: true; paused: Meter | null } | { ok: false; refusal: Refusal }
 
 /**
  * May this account ask the formatting model? `degradable` callers (/v1/format) get `paused` past

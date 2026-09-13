@@ -81,7 +81,8 @@ export function stubFetch(
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
-      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+      const url =
+        typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
       calls.push({ url, init })
       return await respond(url, init)
     })
@@ -100,7 +101,8 @@ export async function sttRequest(
   const form = new FormData()
   form.append('file', new Blob([wav as BlobPart], { type: 'audio/wav' }), 'audio.wav')
   form.append('model', model)
-  for (const [k, v] of Object.entries(extra)) for (const value of Array.isArray(v) ? v : [v]) form.append(k, value)
+  for (const [k, v] of Object.entries(extra))
+    for (const value of Array.isArray(v) ? v : [v]) form.append(k, value)
   // Let the platform serialize the multipart body and pick the boundary, as the apps do.
   const req = new Request('https://client.test/', { method: 'POST', body: form })
   return {
@@ -122,11 +124,17 @@ export function chatRequest(content = 'hello there'): RequestInit {
 }
 
 /** A `/v1/format` request as the apps send it. */
-export function formatRequest(transcript: string, context: Record<string, unknown> = {}): RequestInit {
+export function formatRequest(
+  transcript: string,
+  context: Record<string, unknown> = {}
+): RequestInit {
   return {
     method: 'POST',
     headers: JSON_HEADERS,
-    body: JSON.stringify({ transcript, context: { category: 'chat', tone: 'casual', app: 'Slack', ...context } })
+    body: JSON.stringify({
+      transcript,
+      context: { category: 'chat', tone: 'casual', app: 'Slack', ...context }
+    })
   }
 }
 
