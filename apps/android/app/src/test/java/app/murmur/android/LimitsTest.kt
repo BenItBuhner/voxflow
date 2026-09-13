@@ -117,10 +117,9 @@ class LimitsTest {
         val day = Limits.describe(free.copy(limit = "dictationsPerDay", used = 12.0, allowed = 12.0, resetsAt = NOW + 5 * 3_600_000), NOW)
         assertEquals("Today's free dictations are used up", day.title)
         assertTrue(day.detail, day.detail.startsWith("12 dictations a day on the free plan · resets "))
-        assertEquals(
-            "Inserted without formatting: today's free dictations are used up",
-            Limits.describe(free.copy(limit = "dictationsPerDay"), NOW, LimitStage.FORMATTING).title
-        )
+        val unformatted = Limits.describe(free.copy(limit = "dictationsPerDay"), NOW, LimitStage.FORMATTING)
+        assertEquals("Inserted without formatting", unformatted.title)
+        assertEquals("Today's free dictations are used up · resets Tue 15 Sep", unformatted.detail)
 
         val minutes = Limits.describe(free.copy(limit = "sttSecondsPerWeek", allowed = 420.0), NOW)
         assertEquals("This week's free minutes are used up", minutes.title)
@@ -135,14 +134,17 @@ class LimitsTest {
     fun `Pro is not sold Pro`() {
         val pro = LimitNotice("sttSecondsPerMonth", "pro", "pro", 216_000.0, 216_000.0, utc(2026, Calendar.OCTOBER, 1), null, "")
         val cap = Limits.describe(pro, NOW)
-        assertEquals("This month's transcription has reached its fair-use cap", cap.title)
+        assertEquals("This month's fair-use cap is reached", cap.title)
         assertEquals("60 h a month on Pro · resets on 1 Oct", cap.detail)
         assertFalse(cap.upgradeHelps)
 
         val soft = Limits.describe(pro.copy(limit = "fairUseSttSecondsPerMonth", used = 108_500.0, allowed = 108_000.0), NOW, LimitStage.FORMATTING)
-        assertEquals("Inserted without formatting: fair use reached for this month", soft.title)
-        assertEquals("Past 30 h of transcription a month the text is tidied by rules only · resets on 1 Oct", soft.detail)
+        assertEquals("Inserted without formatting", soft.title)
+        assertEquals("Fair use reached for this month · resets on 1 Oct", soft.detail)
         assertFalse(soft.upgradeHelps)
+        val paused = Limits.describe(pro.copy(limit = "fairUseSttSecondsPerMonth", used = 108_500.0, allowed = 108_000.0), NOW)
+        assertEquals("Fair use reached for this month", paused.title)
+        assertEquals("Past 30 h of transcription a month the text is tidied by rules only · resets on 1 Oct", paused.detail)
 
         val trialClip = Limits.describe(pro.copy(planState = "trial", limit = "maxClipSeconds", used = 700.0, allowed = 600.0, resetsAt = null), NOW)
         assertEquals("That recording is too long", trialClip.title)

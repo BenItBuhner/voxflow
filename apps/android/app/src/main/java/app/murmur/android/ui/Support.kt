@@ -2,6 +2,7 @@ package app.murmur.android.ui
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
@@ -66,9 +67,13 @@ data class InferenceView(
         }
 }
 
+/** A fixed view for previews and screenshot harnesses; null everywhere the app runs for real. */
+val LocalInferenceView = compositionLocalOf<InferenceView?> { null }
+
 /** Build configuration, sync status and Clerk session folded into one view for the current settings. */
 @Composable
 fun rememberInferenceView(settings: MurmurSettings): InferenceView {
+    LocalInferenceView.current?.let { return it }
     val app = LocalContext.current.applicationContext
     val config = (app as? MurmurApplication)?.cloudConfig ?: CloudConfig.OFF
     val syncStatus = CloudSync.get()?.status?.collectAsState()?.value

@@ -185,31 +185,27 @@ object Limits {
 
     /**
      * The calm version of a refusal: which limit it was, the allowance, and when it resets. A
-     * formatting limit never loses text (the rule-based cleanup is inserted instead), and the
-     * wording says so.
+     * formatting limit never loses text (the rule-based cleanup is inserted instead), so its copy
+     * leads with that and gives the reason second.
      */
     fun describe(notice: LimitNotice, now: Long = System.currentTimeMillis(), stage: LimitStage = LimitStage.SPEECH): LimitCopy {
         val reset = notice.resetsAt?.let { formatResetTime(it, now) }
         val resets = if (reset != null) " · resets $reset" else ""
+        val stop = describeStop(notice)
+        if (stage == LimitStage.FORMATTING) {
+            return LimitCopy("Inserted without formatting", "${stop.title}$resets", stop.upgradeHelps)
+        }
+        return stop.copy(detail = "${stop.detail}$resets")
+    }
+
+    /** What ran out and the allowance behind it, without the reset (added by the caller). */
+    private fun describeStop(notice: LimitNotice): LimitCopy {
         val pro = notice.plan == "pro"
         val tier = if (pro) "on Pro" else "on the free plan"
-        val unformatted = stage == LimitStage.FORMATTING
         return when (notice.limit) {
-            "wordsPerWeek" -> LimitCopy(
-                "This week's free words are used up",
-                "${formatCount(notice.allowed)} words a week $tier$resets",
-                true
-            )
-            "sttSecondsPerWeek" -> LimitCopy(
-                "This week's free minutes are used up",
-                "${formatAudioSeconds(notice.allowed)} of speech a week $tier$resets",
-                true
-            )
-            "dictationsPerDay" -> LimitCopy(
-                if (unformatted) "Inserted without formatting: today's free dictations are used up" else "Today's free dictations are used up",
-                "${formatCount(notice.allowed)} dictations a day $tier$resets",
-                true
-            )
+            "wordsPerWeek" -> LimitCopy("This week's free words are used up", "${formatCount(notice.allowed)} words a week $tier", true)
+            "sttSecondsPerWeek" -> LimitCopy("This week's free minutes are used up", "${formatAudioSeconds(notice.allowed)} of speech a week $tier", true)
+            "dictationsPerDay" -> LimitCopy("Today's free dictations are used up", "${formatCount(notice.allowed)} dictations a day $tier", true)
             "maxClipSeconds" -> LimitCopy(
                 if (pro) "That recording is too long" else "That recording is too long for the free plan",
                 if (pro) "Clips can be up to ${formatAudioSeconds(notice.allowed)}"
@@ -217,25 +213,17 @@ object Limits {
                 !pro
             )
             "sttSecondsPerMonth" -> LimitCopy(
-                if (pro) "This month's transcription has reached its fair-use cap" else "This month's free transcription is used up",
-                "${formatAudioSeconds(notice.allowed)} a month $tier$resets",
+                if (pro) "This month's fair-use cap is reached" else "This month's free transcription is used up",
+                "${formatAudioSeconds(notice.allowed)} a month $tier",
                 !pro
             )
             "fairUseSttSecondsPerMonth" -> LimitCopy(
-                "Inserted without formatting: fair use reached for this month",
-                "Past ${formatAudioSeconds(notice.allowed)} of transcription a month the text is tidied by rules only$resets",
+                "Fair use reached for this month",
+                "Past ${formatAudioSeconds(notice.allowed)} of transcription a month the text is tidied by rules only",
                 false
             )
-            "llmTokensPerMonth" -> LimitCopy(
-                if (unformatted) "Inserted without formatting: this month's formatting allowance is used up" else "This month's formatting allowance is used up",
-                "${compactCount(notice.allowed)} tokens a month $tier$resets",
-                !pro
-            )
-            else -> LimitCopy(
-                "Too many requests at once",
-                "Up to ${formatCount(notice.allowed)} requests a minute $tier$resets",
-                !pro
-            )
+            "llmTokensPerMonth" -> LimitCopy("This month's formatting allowance is used up", "${compactCount(notice.allowed)} tokens a month $tier", !pro)
+            else -> LimitCopy("Too many requests at once", "Up to ${formatCount(notice.allowed)} requests a minute $tier", !pro)
         }
     }
 }

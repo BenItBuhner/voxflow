@@ -118,10 +118,10 @@ describe('limit wording', () => {
     )
     expect(day.title).toBe("Today's free dictations are used up")
     expect(day.detail.startsWith('12 dictations a day on the free plan · resets ')).toBe(true)
-    // The same limit met at the formatting stage never loses text; the wording says so.
-    expect(describeLimit({ ...free, limit: 'dictationsPerDay' }, NOW, 'formatting').title).toBe(
-      "Inserted without formatting: today's free dictations are used up"
-    )
+    // The same limit met at the formatting stage never loses text; the wording leads with that.
+    const unformatted = describeLimit({ ...free, limit: 'dictationsPerDay' }, NOW, 'formatting')
+    expect(unformatted.title).toBe('Inserted without formatting')
+    expect(unformatted.detail).toBe("Today's free dictations are used up · resets Tue 15 Sep")
 
     const minutes = describeLimit({ ...free, limit: 'sttSecondsPerWeek', allowed: 420 }, NOW)
     expect(minutes.title).toBe("This week's free minutes are used up")
@@ -148,7 +148,7 @@ describe('limit wording', () => {
       resetsAt: Date.UTC(2026, 9, 1)
     }
     const cap = describeLimit(pro, NOW)
-    expect(cap.title).toBe("This month's transcription has reached its fair-use cap")
+    expect(cap.title).toBe("This month's fair-use cap is reached")
     expect(cap.detail).toBe('60 h a month on Pro · resets on 1 Oct')
     expect(cap.upgradeHelps).toBe(false)
 
@@ -157,11 +157,17 @@ describe('limit wording', () => {
       NOW,
       'formatting'
     )
-    expect(soft.title).toBe('Inserted without formatting: fair use reached for this month')
-    expect(soft.detail).toBe(
+    expect(soft.title).toBe('Inserted without formatting')
+    expect(soft.detail).toBe('Fair use reached for this month · resets on 1 Oct')
+    expect(soft.upgradeHelps).toBe(false)
+    const paused = describeLimit(
+      { ...pro, limit: 'fairUseSttSecondsPerMonth', used: 108_500, allowed: 108_000 },
+      NOW
+    )
+    expect(paused.title).toBe('Fair use reached for this month')
+    expect(paused.detail).toBe(
       'Past 30 h of transcription a month the text is tidied by rules only · resets on 1 Oct'
     )
-    expect(soft.upgradeHelps).toBe(false)
 
     const trialClip = describeLimit(
       {

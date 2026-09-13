@@ -229,7 +229,7 @@ function tierPhrase(notice: LimitNotice): string {
 /**
  * The calm version of a limit refusal: which limit it was, what the allowance is, and when it
  * resets. `stage` says what the limit stopped; a formatting limit never loses text (the rule-based
- * cleanup is inserted instead), and the wording says so.
+ * cleanup is inserted instead), so its copy leads with that and gives the reason second.
  */
 export function describeLimit(
   notice: LimitNotice,
@@ -238,28 +238,38 @@ export function describeLimit(
 ): LimitCopy {
   const reset = notice.resetsAt !== null ? formatResetTime(notice.resetsAt, now) : null
   const resets = reset ? ` · resets ${reset}` : ''
+  const stop = describeStop(notice)
+  if (stage === 'formatting') {
+    return {
+      title: 'Inserted without formatting',
+      detail: `${stop.title}${resets}`,
+      upgradeHelps: stop.upgradeHelps
+    }
+  }
+  return { ...stop, detail: `${stop.detail}${resets}` }
+}
+
+/** What ran out and the allowance behind it, without the reset (added by the caller). */
+function describeStop(notice: LimitNotice): LimitCopy {
   const tier = tierPhrase(notice)
   const pro = notice.plan === 'pro'
-  const unformatted = stage === 'formatting'
   switch (notice.limit) {
     case 'wordsPerWeek':
       return {
         title: "This week's free words are used up",
-        detail: `${formatCount(notice.allowed)} words a week ${tier}${resets}`,
+        detail: `${formatCount(notice.allowed)} words a week ${tier}`,
         upgradeHelps: true
       }
     case 'sttSecondsPerWeek':
       return {
         title: "This week's free minutes are used up",
-        detail: `${formatAudioSeconds(notice.allowed)} of speech a week ${tier}${resets}`,
+        detail: `${formatAudioSeconds(notice.allowed)} of speech a week ${tier}`,
         upgradeHelps: true
       }
     case 'dictationsPerDay':
       return {
-        title: unformatted
-          ? "Inserted without formatting: today's free dictations are used up"
-          : "Today's free dictations are used up",
-        detail: `${formatCount(notice.allowed)} dictations a day ${tier}${resets}`,
+        title: "Today's free dictations are used up",
+        detail: `${formatCount(notice.allowed)} dictations a day ${tier}`,
         upgradeHelps: true
       }
     case 'maxClipSeconds':
@@ -273,29 +283,27 @@ export function describeLimit(
     case 'sttSecondsPerMonth':
       return {
         title: pro
-          ? "This month's transcription has reached its fair-use cap"
+          ? "This month's fair-use cap is reached"
           : "This month's free transcription is used up",
-        detail: `${formatAudioSeconds(notice.allowed)} a month ${tier}${resets}`,
+        detail: `${formatAudioSeconds(notice.allowed)} a month ${tier}`,
         upgradeHelps: !pro
       }
     case 'fairUseSttSecondsPerMonth':
       return {
-        title: 'Inserted without formatting: fair use reached for this month',
-        detail: `Past ${formatAudioSeconds(notice.allowed)} of transcription a month the text is tidied by rules only${resets}`,
+        title: 'Fair use reached for this month',
+        detail: `Past ${formatAudioSeconds(notice.allowed)} of transcription a month the text is tidied by rules only`,
         upgradeHelps: false
       }
     case 'llmTokensPerMonth':
       return {
-        title: unformatted
-          ? "Inserted without formatting: this month's formatting allowance is used up"
-          : "This month's formatting allowance is used up",
-        detail: `${compactCount(notice.allowed)} tokens a month ${tier}${resets}`,
+        title: "This month's formatting allowance is used up",
+        detail: `${compactCount(notice.allowed)} tokens a month ${tier}`,
         upgradeHelps: !pro
       }
     default:
       return {
         title: 'Too many requests at once',
-        detail: `Up to ${formatCount(notice.allowed)} requests a minute ${tier}${resets}`,
+        detail: `Up to ${formatCount(notice.allowed)} requests a minute ${tier}`,
         upgradeHelps: !pro
       }
   }

@@ -32,6 +32,7 @@ import app.murmur.android.cloud.SyncPhase
 import app.murmur.android.cloud.SyncStatus
 import app.murmur.android.cloud.UsageMeterDto
 import app.murmur.android.inference.Limits
+import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.ui.components.ControlRow
 import app.murmur.android.ui.components.Dot
@@ -95,6 +96,31 @@ fun AccountScreen(config: CloudConfig, store: SettingsStore, nav: TopNav, onSign
     val name = status.user?.name
         ?: listOfNotNull(user?.firstName, user?.lastName).joinToString(" ").ifBlank { "Your account" }
     val email = status.user?.email ?: user?.primaryEmailAddress?.emailAddress
+    AccountContent(
+        config = config,
+        status = status,
+        name = name,
+        email = email,
+        settings = settings,
+        nav = nav,
+        onSyncNow = { sync.syncNow() },
+        onSignOut = { scope.launch { sync.signOut() } }
+    )
+}
+
+/** The signed-in Account screen, given everything it shows. */
+@Composable
+fun AccountContent(
+    config: CloudConfig,
+    status: SyncStatus,
+    name: String,
+    email: String?,
+    settings: MurmurSettings,
+    nav: TopNav,
+    onSyncNow: () -> Unit,
+    onSignOut: () -> Unit
+) {
+    val c = Murmur.colors
     val inference = rememberInferenceView(settings)
 
     Screen(title = "Account", nav = nav) {
@@ -129,8 +155,8 @@ fun AccountScreen(config: CloudConfig, store: SettingsStore, nav: TopNav, onSign
         Spacer(Modifier.height(28.dp))
 
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            SecondaryButton("Sync now", onClick = { sync.syncNow() })
-            SecondaryButton("Sign out", onClick = { scope.launch { sync.signOut() } })
+            SecondaryButton("Sync now", onClick = onSyncNow)
+            SecondaryButton("Sign out", onClick = onSignOut)
         }
 
         SectionGap()

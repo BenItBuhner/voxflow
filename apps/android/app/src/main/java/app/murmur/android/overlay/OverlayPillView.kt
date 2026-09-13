@@ -59,6 +59,9 @@ private const val LIMIT_MAX_W_DP = 380f
 private const val LIMIT_H_DP = 104f
 private const val LIMIT_RADIUS_DP = 24f
 
+/** Text that went in with rule-based cleanup only: the success pill grows a second, quieter line. */
+private const val SOFT_LIMIT_H_DP = 64f
+
 /** How far outside the pill a touch still counts; the touch window is padded by this. */
 private const val TOUCH_PAD_DP = 6f
 
@@ -389,10 +392,16 @@ class OverlayPillView(context: Context) : View(context) {
         is DictationState.Listening -> listeningLook()
         is DictationState.Processing -> Look(Kind.PROCESSING, textPaint.measureText(s.label) + dp(64f), dp(TALL_DP), palette.background, s.label)
         is DictationState.Success -> {
-            // Text that went in with rule-based cleanup only: the message says so, and why.
-            val text = s.limit?.let { Limits.describe(it, stage = LimitStage.FORMATTING).title } ?: s.message
-            val maxW = if (screenW > 0f) min(dp(MESSAGE_MAX_W_DP), screenW - 2 * dp(OverlayGeometry.EDGE_MARGIN_DP)) else dp(MESSAGE_MAX_W_DP)
-            Look(Kind.SUCCESS, min(maxW, textPaint.measureText(text) + dp(56f)), dp(TALL_DP), palette.successBackground, text, limit = s.limit)
+            val limit = s.limit
+            if (limit == null) {
+                Look(Kind.SUCCESS, textPaint.measureText(s.message) + dp(56f), dp(TALL_DP), palette.successBackground, s.message)
+            } else {
+                // Text that went in with rule-based cleanup only: the pill says so, and why, on a second line.
+                val copy = Limits.describe(limit, stage = LimitStage.FORMATTING)
+                val maxW = if (screenW > 0f) min(dp(LIMIT_MAX_W_DP), screenW - 2 * dp(OverlayGeometry.EDGE_MARGIN_DP)) else dp(LIMIT_MAX_W_DP)
+                val natural = max(textPaint.measureText(copy.title), tinyTextPaint.measureText(copy.detail)) + dp(56f)
+                Look(Kind.SUCCESS, min(maxW, natural), dp(SOFT_LIMIT_H_DP), palette.successBackground, copy.title, limit = limit)
+            }
         }
         is DictationState.Error -> {
             val limit = s.limit?.takeIf { it.isPlanLimit }
@@ -831,7 +840,8 @@ class OverlayPillView(context: Context) : View(context) {
     }
 
     private fun drawMessage(canvas: Canvas, box: Box, look: Look, color: Int, check: Boolean, now: Long) {
-        val cy = box.centerY
+        // A success with a limit behind it has its title on the first line and the reason under it.
+        val cy = if (check && look.limit != null) box.top + dp(SOFT_LIMIT_H_DP) / 2f - dp(9f) else box.centerY
         val iconCx = box.left + dp(22f)
         strokePaint.color = color
         strokePaint.strokeWidth = dp(2.4f)
@@ -867,6 +877,12 @@ class OverlayPillView(context: Context) : View(context) {
         }
         canvas.drawText(msg, box.left + dp(38f), cy + textPaint.textSize / 2.8f, textPaint)
         if (retryable) drawRetryControls(canvas, box, look)
+        if (check && look.limit != null) {
+            val detail = Limits.describe(look.limit, stage = LimitStage.FORMATTING).detail
+            tinyTextPaint.color = ink(0xA6)
+            canvas.drawText(fitText(detail, tinyTextPaint, look.restingW - dp(48f)), box.left + dp(38f), cy + dp(10f) + tinyTextPaint.textSize, tinyTextPaint)
+            tinyTextPaint.color = palette.ink
+        }
     }
 
     /**

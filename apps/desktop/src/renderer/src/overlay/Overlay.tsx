@@ -12,6 +12,8 @@ const PILL_HEIGHT = 44
 const PILL_PAD_X = 16
 /** The limit notice: two lines and a row of buttons, at the sheet radius rather than a capsule. */
 const LIMIT_HEIGHT = 112
+/** Text that went in with rule-based cleanup only: the success pill grows a second, quieter line. */
+const SOFT_HEIGHT = 64
 const LIMIT_PAD_X = 20
 /** How long an outgoing layer keeps fading; must cover `overlay-layer-out` in globals.css. */
 const LEAVE_MS = 240
@@ -34,6 +36,17 @@ interface Props {
 /** A refusal on a plan limit: the pill explains it instead of showing the bare error. */
 function isLimitStop(s: OverlayState): s is OverlayState & { limit: LimitNotice } {
   return s.phase === 'error' && !!s.limit
+}
+
+/** Text inserted with rule-based cleanup only because a plan limit paused or refused the model. */
+function isSoftLimit(s: OverlayState): s is OverlayState & { limit: LimitNotice } {
+  return s.phase === 'success' && !!s.limit
+}
+
+function contentHeight(s: OverlayState): string {
+  if (isLimitStop(s)) return 'h-[112px]'
+  if (isSoftLimit(s)) return 'h-[64px]'
+  return 'h-11'
 }
 
 /** One set of pill contents. The current layer renders live props; leaving layers are frozen. */
@@ -176,7 +189,13 @@ export function Overlay({
 
   const padX = limitStop ? LIMIT_PAD_X : PILL_PAD_X
   const width = idle ? IDLE_WIDTH : Math.max(IDLE_WIDTH, contentWidth + padX * 2)
-  const height = idle ? IDLE_HEIGHT : limitStop ? LIMIT_HEIGHT : PILL_HEIGHT
+  const height = idle
+    ? IDLE_HEIGHT
+    : limitStop
+      ? LIMIT_HEIGHT
+      : isSoftLimit(state)
+        ? SOFT_HEIGHT
+        : PILL_HEIGHT
   const phase = state.phase
 
   return (
@@ -217,7 +236,7 @@ export function Overlay({
               ref={layer.leaving ? undefined : contentRef}
               className={cn(
                 'flex items-center gap-3 whitespace-nowrap',
-                isLimitStop(layer.leaving ? layer.state : state) ? 'h-[112px]' : 'h-11'
+                contentHeight(layer.leaving ? layer.state : state)
               )}
             >
               <Contents
@@ -325,17 +344,23 @@ function Contents({
     case 'success': {
       // Text that went in with rule-based cleanup only: say so in passing, and when it comes back.
       const soft = state.limit ? describeLimit(state.limit, Date.now(), 'formatting') : null
+      if (soft) {
+        return (
+          <>
+            <CheckIcon />
+            <div className="flex flex-col gap-0.5 leading-tight">
+              <span className="max-w-[460px] truncate">{label}</span>
+              <span className="max-w-[460px] truncate text-meta font-normal text-overlay-foreground/65">
+                {soft.detail}
+              </span>
+            </div>
+          </>
+        )
+      }
       return (
         <>
           <CheckIcon />
-          <span className="max-w-[420px] truncate" title={soft?.detail}>
-            {label}
-          </span>
-          {soft && state.limit?.resetsAt !== null && state.limit?.resetsAt !== undefined && (
-            <span className="max-w-[160px] truncate text-meta text-overlay-foreground/60">
-              {soft.detail.slice(soft.detail.lastIndexOf('resets'))}
-            </span>
-          )}
+          <span>{label}</span>
         </>
       )
     }
