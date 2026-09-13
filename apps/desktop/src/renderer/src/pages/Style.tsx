@@ -230,7 +230,7 @@ export function StylePage(): React.JSX.Element {
         description={
           murmurLlm
             ? 'The formatting model that comes with your account. It receives the raw transcript together with where the text is going, and its answer is verified before anything is inserted.'
-            : 'An OpenAI-compatible chat model. Fast small models (Groq Llama 8B, gpt-4o-mini, Cerebras) keep the round trip under a second. It receives the raw transcript together with where the text is going, and its answer is verified before anything is inserted.'
+            : 'An OpenAI-compatible chat model. Fast small models (Groq gpt-oss-20b, gpt-4o-mini, Cerebras) keep the round trip under a second. It receives the raw transcript together with where the text is going, and its answer is verified before anything is inserted.'
         }
       >
         <SettingRow
@@ -297,7 +297,7 @@ export function StylePage(): React.JSX.Element {
                   discovering={discovering}
                   onDiscover={discover}
                   discoverError={discoverError}
-                  placeholder="e.g. llama-3.1-8b-instant"
+                  placeholder="e.g. openai/gpt-oss-20b"
                 />
               </div>
             </SettingRow>

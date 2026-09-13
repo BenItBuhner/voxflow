@@ -251,6 +251,12 @@ class SettingsStore(context: Context) {
         // The rule-based cleanup knobs went away with the text engine; their keys are dead weight.
         val stale = LEGACY_CLEANUP_KEYS.filter { prefs.contains(it) }
         if (stale.isNotEmpty()) prefs.edit().apply { for (k in stale) remove(k) }.apply()
+        // Models the hosted providers retired (RetiredModels) are swapped for the recommended
+        // replacement once; from then on whatever the store names is the user's own choice.
+        if (prefs.getInt(MODEL_MIGRATION_KEY, 0) < MODEL_MIGRATION) {
+            update(SettingsOrigin.LOCAL) { RetiredModels.migrate(it) }
+            prefs.edit().putInt(MODEL_MIGRATION_KEY, MODEL_MIGRATION).apply()
+        }
         if (_flow.value.deviceId.isEmpty()) {
             update(SettingsOrigin.CLOUD) { it.copy(deviceId = java.util.UUID.randomUUID().toString()) }
         }
@@ -371,6 +377,9 @@ class SettingsStore(context: Context) {
     companion object {
         private const val LEGACY_ANCHOR_X = "overlayAnchorX"
         private const val LEGACY_OFFSET_DP = "overlayOffsetDp"
+        /** Bump when RetiredModels gains entries that existing installs should be moved off. */
+        private const val MODEL_MIGRATION = 1
+        private const val MODEL_MIGRATION_KEY = "modelMigration"
         private val LEGACY_CLEANUP_KEYS = listOf(
             "removeFillers", "hesitations", "hesitationPhrases", "collapseRepeats", "repetitionScope",
             "spokenCommands", "selfCorrections", "autoCapitalize", "lists", "listStyle", "bulletMarker",

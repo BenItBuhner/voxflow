@@ -183,7 +183,7 @@ fun StyleScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) {
                     value = settings.llmModel,
                     onValueChange = { store.update { s -> s.copy(llmModel = it) } },
                     label = "Model",
-                    placeholder = "llama-3.1-8b-instant",
+                    placeholder = "openai/gpt-oss-20b",
                     helper = "A small, fast instruct model. The rule-based cleanup always covers a slow or refused answer."
                 )
                 Spacer(Modifier.height(14.dp))

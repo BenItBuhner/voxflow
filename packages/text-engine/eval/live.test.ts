@@ -9,7 +9,7 @@ import { contextOf, loadFixtures, scoreText, summarize, type Score } from './sco
  * The corpus against a real model:
  *
  *   MURMUR_LIVE=1 MURMUR_BASE_URL=https://api.groq.com/openai/v1 MURMUR_API_KEY=... \
- *   MURMUR_LLM_MODEL=llama-3.1-8b-instant npm run test:live
+ *   MURMUR_LLM_MODEL=openai/gpt-oss-20b npm run test:live
  *
  * Prints a per-fixture report, writes eval/last-run.json (ignored by git) with every prompt,
  * answer and verdict, and fails when fewer than MURMUR_EVAL_MIN_PASS (default 0.8) of the fixtures
