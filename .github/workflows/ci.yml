@@ -172,3 +172,30 @@ jobs:
           path: apps/android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: ignore
           retention-days: 7
+
+  web-check:
+    name: Web typecheck, lint, test, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      # The web typecheck resolves backend types from packages/backend/convex, like the desktop app.
+      - run: npm ci
+        working-directory: packages/backend
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      # `next build` prerenders every page and the release endpoints against the live GitHub
+      # Releases API; a rate-limited API only degrades the output, it never fails the build. The
+      # workflow token lifts the anonymous limit shared by the runner's IP.
+      - run: npm run build
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

@@ -1,0 +1,11 @@
+# Next.js build output and generated types (next-env.d.ts is written by `next dev`/`next build`).
+/.next/
+/out/
+next-env.d.ts
+*.tsbuildinfo
+
+# Vercel CLI link metadata
+.vercel
+
+# Vitest
+/coverage

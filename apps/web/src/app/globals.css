@@ -1,0 +1,347 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens, the same names and values as the desktop app's
+ * apps/desktop/src/renderer/src/styles/globals.css (and the Android app's Theme.kt): the radius
+ * scale, the spacing roles, the three elevation levels, the surface roles and the type scale.
+ * Colour is the apps' neutral OKLCH palette; dark mode follows the visitor's system setting.
+ *
+ * Structure comes from surfaces and space, not lines: a raised card on the canvas, a well sunk
+ * into a card, rows separated by rhythm. Borders are not drawn anywhere; edges come from tonal
+ * contrast and the three elevation levels.
+ */
+:root {
+  color-scheme: light;
+  --font-sans:
+    var(--font-inter), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+  --font-serif:
+    var(--font-instrument-serif), 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+
+  /*
+   * Radius scale, in 4px steps like the spacing grid. Nested corners are concentric: a surface
+   * inset by p from a corner of radius r takes radius r - p, which always lands on this scale
+   * (a 12px row inside a 20px card with 8px padding). Nothing nested may be rounder than what
+   * holds it. Pills (buttons, badges, the dictation pill) are fully round and sit outside the scale.
+   */
+  --radius-xs: 4px; /* key caps, code chips */
+  --radius-sm: 8px; /* small nested chips */
+  --radius-md: 12px; /* fields, rows inside a card, wells inside a card */
+  --radius-lg: 16px; /* a block inside a sheet, banners */
+  --radius-xl: 20px; /* cards, sections, tiles, empty states */
+  --radius-2xl: 24px; /* sheets */
+
+  /* Spacing roles on the 4px grid. */
+  --space-card: 1.25rem; /* padding of a card or section (20px) */
+  --space-card-tight: 0.5rem; /* padding of a list card whose rows are surfaces (8px) */
+  --space-row: 0.875rem; /* vertical rhythm between rows of a section (14px) */
+  --space-section: 2rem; /* between a section's heading and its content, and between sections (32px) */
+  --space-gutter: 3rem; /* page gutter (48px) */
+
+  /*
+   * Elevation. Raised: a card resting on the canvas. Floating: a layer above the page. Overlay:
+   * a sheet over everything. Light casts soft warm shadows; dark lifts by tone and keeps a thin
+   * light catch on top. The dictation pill keeps its own values, as in the apps.
+   */
+  --elevation-raised: 0 1px 2px oklch(0.2 0.02 60 / 0.06), 0 2px 8px -2px oklch(0.2 0.02 60 / 0.05);
+  --elevation-floating:
+    0 1px 3px oklch(0.2 0.02 60 / 0.06), 0 8px 24px -6px oklch(0.2 0.02 60 / 0.16);
+  --elevation-overlay:
+    0 2px 6px oklch(0.2 0.02 60 / 0.08), 0 24px 56px -16px oklch(0.2 0.02 60 / 0.28);
+  --elevation-pill: 0 6px 24px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+
+  /* Surface roles: rail (sidebar) < canvas (background) < raised (card) < floating (popover). */
+  --background: oklch(0.97 0.003 85);
+  --foreground: oklch(0.2 0.01 60);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.2 0.01 60);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.2 0.01 60);
+  --primary: oklch(0.22 0.01 60);
+  --primary-foreground: oklch(0.985 0.002 90);
+  --secondary: oklch(0.945 0.004 80);
+  --secondary-foreground: oklch(0.25 0.01 60);
+  /* The well: fields and inset panels sunk into a card or the canvas. */
+  --muted: oklch(0.945 0.004 80);
+  --muted-foreground: oklch(0.5 0.01 60);
+  /* Hover fills. */
+  --accent: oklch(0.925 0.005 80);
+  --accent-foreground: oklch(0.22 0.01 60);
+  --destructive: oklch(0.6 0.2 25);
+  --destructive-foreground: oklch(0.985 0 0);
+  /* Tracks only (meters); never drawn as an edge. */
+  --border: oklch(0.9 0.005 80);
+  --input: oklch(0.9 0.005 80);
+  --ring: oklch(0.55 0.02 60);
+  --record: oklch(0.68 0.21 35);
+  --success: oklch(0.65 0.16 150);
+  --warning: oklch(0.75 0.16 75);
+  --info: oklch(0.62 0.16 250);
+  --sidebar: oklch(0.95 0.003 85);
+  --overlay: oklch(0.18 0 0);
+  --overlay-foreground: oklch(1 0 0);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --elevation-raised: 0 1px 2px oklch(0 0 0 / 0.35), inset 0 1px 0 oklch(1 0 0 / 0.035);
+    --elevation-floating: 0 10px 28px -8px oklch(0 0 0 / 0.6), inset 0 1px 0 oklch(1 0 0 / 0.06);
+    --elevation-overlay: 0 24px 64px -12px oklch(0 0 0 / 0.75), inset 0 1px 0 oklch(1 0 0 / 0.07);
+    --background: oklch(0.15 0.004 60);
+    --foreground: oklch(0.93 0.004 80);
+    --card: oklch(0.205 0.005 60);
+    --card-foreground: oklch(0.93 0.004 80);
+    --popover: oklch(0.245 0.005 60);
+    --popover-foreground: oklch(0.93 0.004 80);
+    --primary: oklch(0.93 0.004 80);
+    --primary-foreground: oklch(0.18 0.005 60);
+    --secondary: oklch(0.26 0.005 60);
+    --secondary-foreground: oklch(0.93 0.004 80);
+    --muted: oklch(0.26 0.005 60);
+    --muted-foreground: oklch(0.68 0.008 70);
+    --accent: oklch(0.275 0.006 60);
+    --accent-foreground: oklch(0.93 0.004 80);
+    --destructive: oklch(0.62 0.19 25);
+    --destructive-foreground: oklch(0.985 0 0);
+    --border: oklch(0.29 0.006 60);
+    --input: oklch(0.3 0.006 60);
+    --ring: oklch(0.6 0.01 60);
+    --record: oklch(0.7 0.2 35);
+    --success: oklch(0.7 0.15 150);
+    --warning: oklch(0.8 0.15 75);
+    --info: oklch(0.7 0.14 250);
+    --sidebar: oklch(0.125 0.004 60);
+  }
+}
+
+@theme inline {
+  --font-sans: var(--font-sans);
+  --font-serif: var(--font-serif);
+  --font-mono: var(--font-mono);
+
+  /* The radius scale (rounded-xs … rounded-2xl). Larger Tailwind steps are not part of the system. */
+  --radius-xs: var(--radius-xs);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --radius-2xl: var(--radius-2xl);
+  --radius-3xl: var(--radius-2xl);
+  --radius-4xl: var(--radius-2xl);
+
+  /*
+   * Spacing roles (p-card, px-gutter, mt-section …). Every key here also becomes an
+   * `inline-<key>` utility, so none of them may be the name of a display value.
+   */
+  --spacing-card: var(--space-card);
+  --spacing-card-tight: var(--space-card-tight);
+  --spacing-row: var(--space-row);
+  --spacing-section: var(--space-section);
+  --spacing-gutter: var(--space-gutter);
+
+  /* Only the three elevation levels exist as shadows (plus the pill's own). */
+  --shadow-2xs: 0 0 #0000;
+  --shadow-xs: 0 0 #0000;
+  --shadow-sm: 0 0 #0000;
+  --shadow-md: 0 0 #0000;
+  --shadow-lg: 0 0 #0000;
+  --shadow-xl: 0 0 #0000;
+  --shadow-2xl: 0 0 #0000;
+  --shadow-raised: var(--elevation-raised);
+  --shadow-floating: var(--elevation-floating);
+  --shadow-overlay: var(--elevation-overlay);
+  --shadow-pill: var(--elevation-pill);
+
+  /*
+   * Type scale. Sans: caption 11, meta 12, note 13, body 14, lead 15. Serif display (with
+   * .serif-display): heading 24, numeral 32, title 36, display 56.
+   */
+  --text-caption: 11px;
+  --text-caption--line-height: 1.3;
+  --text-meta: 12px;
+  --text-meta--line-height: 1.35;
+  --text-note: 13px;
+  --text-note--line-height: 1.4;
+  --text-body: 14px;
+  --text-body--line-height: 1.5;
+  --text-lead: 15px;
+  --text-lead--line-height: 1.55;
+  --text-heading: 24px;
+  --text-heading--line-height: 1.1;
+  --text-numeral: 32px;
+  --text-numeral--line-height: 1;
+  --text-title: 36px;
+  --text-title--line-height: 1.05;
+  --text-display: 56px;
+  --text-display--line-height: 1;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-record: var(--record);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-sidebar: var(--sidebar);
+  --color-overlay: var(--overlay);
+  --color-overlay-foreground: var(--overlay-foreground);
+
+  --animate-rise-in: rise-in 420ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  --animate-pill-bar: pill-bar 1.15s ease-in-out infinite;
+  --animate-pulse-soft: pulse-soft 1.6s ease-in-out infinite;
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes pill-bar {
+  0%,
+  100% {
+    transform: scaleY(0.45);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(0.85);
+  }
+}
+
+/* Tracked uppercase label that introduces a group. */
+@utility eyebrow {
+  font-size: var(--text-caption);
+  line-height: 1;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+/* Editorial serif for headlines and large numerals. */
+@utility serif-display {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  letter-spacing: -0.015em;
+  line-height: 1.05;
+  font-feature-settings: normal;
+}
+
+/*
+ * Surface roles as utilities, so a page says what a thing is rather than how it is drawn.
+ *   surface-raised    a card resting on the canvas (cards, sections, tiles, list cards)
+ *   surface-floating  a layer above the page
+ *   surface-overlay   a sheet over everything
+ *   well              a field or panel sunk into whatever holds it
+ *   dictation-pill    the pill as it floats over other apps: always dark, its own shadow
+ */
+@utility surface-raised {
+  background-color: var(--card);
+  color: var(--card-foreground);
+  box-shadow: var(--elevation-raised);
+}
+@utility surface-floating {
+  background-color: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: var(--elevation-floating);
+}
+@utility surface-overlay {
+  background-color: var(--card);
+  color: var(--card-foreground);
+  box-shadow: var(--elevation-overlay);
+}
+@utility well {
+  background-color: var(--muted);
+}
+@utility dictation-pill {
+  background-color: var(--overlay);
+  color: var(--overlay-foreground);
+  box-shadow: var(--elevation-pill);
+}
+
+/* The blocks of the hero arrive one after another. */
+@utility stagger {
+  & > * {
+    animation: rise-in 420ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  }
+  & > :nth-child(2) {
+    animation-delay: 40ms;
+  }
+  & > :nth-child(3) {
+    animation-delay: 80ms;
+  }
+  & > :nth-child(4) {
+    animation-delay: 120ms;
+  }
+  & > :nth-child(5) {
+    animation-delay: 160ms;
+  }
+  & > :nth-child(n + 6) {
+    animation-delay: 200ms;
+  }
+}
+
+@layer base {
+  * {
+    outline-color: color-mix(in oklch, var(--ring) 50%, transparent);
+  }
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+    text-rendering: optimizeLegibility;
+  }
+  ::selection {
+    background: color-mix(in oklch, var(--record) 28%, transparent);
+  }
+  /* A key cap: a small raised surface at the smallest radius, whatever it sits on. */
+  kbd {
+    @apply inline-flex h-6 min-w-6 items-center justify-center rounded-xs bg-card px-1.5 text-caption font-medium text-foreground shadow-raised;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    .stagger > *,
+    .animate-rise-in,
+    .animate-pill-bar,
+    .animate-pulse-soft {
+      animation: none !important;
+    }
+  }
+}
