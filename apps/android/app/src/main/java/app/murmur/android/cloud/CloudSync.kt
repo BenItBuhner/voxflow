@@ -16,10 +16,12 @@ import dev.convex.android.WebSocketState
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,6 +30,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 
 private const val TAG = "MurmurCloud"
 private const val RETRY_MS = 15_000L
@@ -81,6 +84,8 @@ class CloudSync private constructor(
     private var user: UserDto? = null
     private var devices: List<DeviceDto> = emptyList()
     private var inference: InferenceStatusDto? = null
+    /** The instance rejected the `day` argument: an older backend, asked the old way from then on. */
+    @Volatile private var statusWithoutDay = false
     private var serverDictionary: List<DictionaryEntryDto>? = null
     private var serverPreferences: PreferencesDto? = null
     private var serverStats: StatsDto? = null
@@ -287,13 +292,41 @@ class CloudSync private constructor(
                     publish()
                 }
             }
-            launch {
-                convex.subscribe<InferenceStatusDto>("inference:status").collect { result ->
+            launch { subscribeStatus(gen) }
+        }
+    }
+
+    /**
+     * The managed-model status for today (UTC), asked again when the day changes so the rolling
+     * windows (words this week, dictations today) and their reset times stay right. An instance
+     * that does not accept the `day` argument yet answers with an argument error; then the status
+     * is asked the old way, without windows.
+     */
+    private suspend fun subscribeStatus(gen: Int) = coroutineScope {
+        val convex = client ?: return@coroutineScope
+        while (gen == generation) {
+            val withDay = !statusWithoutDay
+            val args: Map<String, Any?> = if (withDay) mapOf("day" to InferenceStatusDto.currentUtcDay()) else emptyMap()
+            val refused = CompletableDeferred<Unit>()
+            val subscription = launch {
+                convex.subscribe<InferenceStatusDto>("inference:status", args).collect { result ->
                     if (gen != generation) return@collect
-                    result.onSuccess { inference = it }.onFailure { Log.w(TAG, "inference status: ${it.message}") }
+                    result.onSuccess { inference = it }.onFailure { e ->
+                        if (withDay && e.message?.contains("ArgumentValidationError", ignoreCase = true) == true) {
+                            Log.i(TAG, "instance does not take a day for inference:status; asking without it")
+                            statusWithoutDay = true
+                            refused.complete(Unit)
+                        } else {
+                            Log.w(TAG, "inference status: ${e.message}")
+                        }
+                    }
                     publish()
                 }
             }
+            // Until the day turns or the argument is refused (without the day there is no turning:
+            // the wait only ends with the scope, on sign-out or a new generation).
+            if (withDay) withTimeoutOrNull(InferenceStatusDto.msUntilNextUtcDay()) { refused.await() } else refused.await()
+            subscription.cancel()
         }
     }
 

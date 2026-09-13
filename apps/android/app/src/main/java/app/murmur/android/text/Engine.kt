@@ -1,5 +1,6 @@
 package app.murmur.android.text
 
+import app.murmur.android.inference.LimitNotice
 import app.murmur.android.llm.ChatMessage
 import app.murmur.android.settings.DictionaryEntry
 import app.murmur.android.settings.FormattingMode
@@ -35,7 +36,12 @@ data class FormatResult(
     val status: FormatStatus,
     val modelText: String? = null,
     val llmMs: Long = 0,
-    val stages: List<String> = emptyList()
+    val stages: List<String> = emptyList(),
+    /**
+     * The plan limit a Murmur instance applied when it answered with rule-based text instead of
+     * asking the model (a Pro account past its fair-use cap). Only ever set on a gateway answer.
+     */
+    val limit: LimitNotice? = null
 ) {
     companion object {
         /** The body of a `POST /v1/format` answer. */
@@ -54,7 +60,8 @@ data class FormatResult(
                 ),
                 modelText = json.optString("modelText").takeIf { json.has("modelText") && !json.isNull("modelText") },
                 llmMs = json.optLong("llmMs", 0),
-                stages = stages
+                stages = stages,
+                limit = LimitNotice.fromJson(json.optJSONObject("limit"), status.optString("detail").takeIf { status.has("detail") })
             )
         }
     }

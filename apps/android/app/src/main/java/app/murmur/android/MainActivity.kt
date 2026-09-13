@@ -1,5 +1,7 @@
 package app.murmur.android
 
+import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -14,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -66,10 +69,15 @@ import app.murmur.android.update.UpdateManager
 import app.murmur.android.update.UpdatePhase
 import com.clerk.api.Clerk
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 class MainActivity : ComponentActivity() {
+    /** A screen another part of the app asked for (the pill's "own model" chip); consumed once shown. */
+    private val requestedRoute = MutableStateFlow<Route?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        requestedRoute.value = routeFrom(intent)
         val store = SettingsStore.get(this)
         // A forced light/dark choice picks the window theme too, so the frame before Compose draws
         // (and the window background behind the keyboard) already has the right brightness.
@@ -84,10 +92,16 @@ class MainActivity : ComponentActivity() {
             val settings by store.flow.collectAsState()
             MurmurTheme(settings) {
                 Box(Modifier.fillMaxSize().background(Murmur.colors.paper)) {
-                    Root(config, store, settings)
+                    Root(config, store, settings, requestedRoute, onRouteShown = { requestedRoute.value = null })
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        routeFrom(intent)?.let { requestedRoute.value = it }
     }
 
     override fun onResume() {
@@ -107,6 +121,17 @@ class MainActivity : ComponentActivity() {
         OverlayEditor.stop()
         super.onStop()
     }
+
+    companion object {
+        private const val EXTRA_ROUTE = "app.murmur.android.ROUTE"
+
+        /** An intent that brings Murmur to the front on [route] (the activity is a single task). */
+        fun intentFor(context: Context, route: Route): Intent =
+            Intent(context, MainActivity::class.java).putExtra(EXTRA_ROUTE, route.name)
+
+        fun routeFrom(intent: Intent?): Route? =
+            intent?.getStringExtra(EXTRA_ROUTE)?.let { name -> Route.entries.firstOrNull { it.name == name } }
+    }
 }
 
 /**
@@ -114,7 +139,13 @@ class MainActivity : ComponentActivity() {
  * A device that signed in before keeps working from its local mirror when Clerk cannot be reached.
  */
 @Composable
-private fun Root(config: CloudConfig, store: SettingsStore, settings: MurmurSettings) {
+private fun Root(
+    config: CloudConfig,
+    store: SettingsStore,
+    settings: MurmurSettings,
+    requestedRoute: StateFlow<Route?>,
+    onRouteShown: () -> Unit
+) {
     val clerkReady by (if (config.enabled) Clerk.isInitialized else remember { MutableStateFlow(true) }).collectAsState()
     val clerkUser by (if (config.enabled) Clerk.userFlow else remember { MutableStateFlow(null) }).collectAsState()
     val syncStatus = CloudSync.get()?.status?.collectAsState()?.value
@@ -145,7 +176,7 @@ private fun Root(config: CloudConfig, store: SettingsStore, settings: MurmurSett
         return
     }
 
-    Main(config, store, settings, signedIn, firstName, syncStatus)
+    Main(config, store, settings, signedIn, firstName, syncStatus, requestedRoute, onRouteShown)
 }
 
 /**
@@ -160,11 +191,20 @@ private fun Main(
     settings: MurmurSettings,
     signedIn: Boolean,
     firstName: String?,
-    syncStatus: SyncStatus?
+    syncStatus: SyncStatus?,
+    requestedRoute: StateFlow<Route?>,
+    onRouteShown: () -> Unit
 ) {
     val c = Murmur.colors
     val context = LocalContext.current
     val navigator = rememberNavigator()
+    val requested by requestedRoute.collectAsState()
+    LaunchedEffect(requested) {
+        requested?.let {
+            navigator.select(it)
+            onRouteShown()
+        }
+    }
     val permissions = rememberPermissionState()
     val dictation by DictationController.state.collectAsState()
     val updateState by UpdateManager.get(context).state.collectAsState()

@@ -38,6 +38,10 @@ data class UserDto(
     val imageUrl: String? = null,
     /** Account tier (`free` or `pro`), deciding the managed-inference allowance. */
     val plan: String = "free",
+    /** `trial`, `free` or `pro`; absent from an instance that predates plan states. */
+    val planState: String? = null,
+    /** Epoch ms; present once the account has been granted its trial. */
+    val trialEndsAt: Double? = null,
     val onboardingCompletedAt: Double? = null,
     val onboardingVersion: Double? = null,
     val createdAt: Double = 0.0
@@ -64,7 +68,36 @@ data class InferenceUsageDto(
     val llmRequests: Double = 0.0
 )
 
-/** What the instance offers the signed-in account in managed models, and how much is left (`inference:status`). */
+/** One limit that applies to the account's tier, with how much of it is used and when it next drops. */
+@Serializable
+data class UsageMeterDto(
+    val limit: String,
+    val used: Double = 0.0,
+    val allowed: Double = 0.0,
+    val exceeded: Boolean = false,
+    /** Epoch ms: when `used` next drops; if exceeded, when it drops under `allowed`. */
+    val resetsAt: Double = 0.0
+)
+
+/** The rolling windows the gateway computed for the UTC day the client passed. */
+@Serializable
+data class UsageWindowDto(
+    val day: String = "",
+    val weekStart: String = "",
+    val words: Double = 0.0,
+    val sttSeconds: Double = 0.0,
+    val dictationsToday: Double = 0.0
+)
+
+/** Next resets (epoch ms): UTC midnight, the oldest counted day leaving the week, the first of next month. */
+@Serializable
+data class UsageResetsDto(val day: Double = 0.0, val week: Double? = null, val month: Double = 0.0)
+
+/**
+ * What the instance offers the signed-in account in managed models, and how much is left
+ * (`inference:status`). The fields after `usage` arrive from an instance that meters plans; an
+ * older instance leaves them out, and the plan state then follows the tier.
+ */
 @Serializable
 data class InferenceStatusDto(
     /** The instance is configured with at least a managed speech model. */
@@ -72,7 +105,16 @@ data class InferenceStatusDto(
     val models: InferenceModelsDto = InferenceModelsDto(),
     val plan: String = "free",
     val limits: InferenceLimitsDto = InferenceLimitsDto(),
-    val usage: InferenceUsageDto = InferenceUsageDto()
+    val usage: InferenceUsageDto = InferenceUsageDto(),
+    val planState: String? = null,
+    val trialEndsAt: Double? = null,
+    /** Pro past the soft fair-use cap: `/v1/format` answers with rule-based text until the month resets. */
+    val formattingPaused: Boolean = false,
+    /** The web account page that starts an upgrade; null when the instance has no site URL. */
+    val upgradeUrl: String? = null,
+    val window: UsageWindowDto? = null,
+    val meters: List<UsageMeterDto> = emptyList(),
+    val resets: UsageResetsDto? = null
 ) {
     /** Managed speech seconds used in [period], zero for any other month. */
     fun sttSecondsIn(period: String): Double = if (usage.period == period) usage.sttSeconds else 0.0
@@ -85,6 +127,29 @@ data class InferenceStatusDto(
             val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
             cal.timeInMillis = now
             return "%04d-%02d".format(cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH) + 1)
+        }
+
+        /** Current UTC calendar day as `YYYY-MM-DD`, the `day` the status query computes its windows for. */
+        fun currentUtcDay(now: Long = System.currentTimeMillis()): String {
+            val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+            cal.timeInMillis = now
+            return "%04d-%02d-%02d".format(
+                cal.get(java.util.Calendar.YEAR),
+                cal.get(java.util.Calendar.MONTH) + 1,
+                cal.get(java.util.Calendar.DAY_OF_MONTH)
+            )
+        }
+
+        /** Milliseconds from [now] to the next UTC midnight, when the status has to be asked again. */
+        fun msUntilNextUtcDay(now: Long = System.currentTimeMillis()): Long {
+            val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+            cal.timeInMillis = now
+            cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+            cal.set(java.util.Calendar.MINUTE, 0)
+            cal.set(java.util.Calendar.SECOND, 0)
+            cal.set(java.util.Calendar.MILLISECOND, 0)
+            cal.add(java.util.Calendar.DAY_OF_MONTH, 1)
+            return (cal.timeInMillis - now).coerceAtLeast(1L)
         }
     }
 }
