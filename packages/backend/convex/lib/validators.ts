@@ -308,7 +308,10 @@ export const inferenceStatusValidator = v.object({
   }),
   /** Pro past its soft fair-use cap: /v1/format answers with rule-based text. */
   formattingPaused: v.boolean(),
+  /** Where to pay; null for paying accounts and for instances without a site URL. */
   upgradeUrl: v.union(v.string(), v.null()),
+  /** The site's account page (plan, usage, billing); null only for instances without a site URL. */
+  accountUrl: v.union(v.string(), v.null()),
   /** The rolling week and the day the client asked about; null without a `day` argument. */
   window: v.union(
     v.object({

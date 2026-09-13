@@ -19,7 +19,7 @@ import {
   type UsageSnapshot
 } from './lib/entitlements'
 import { authedQuery } from './lib/functions'
-import { MURMUR_MODELS, readUpstreams, upgradeUrlFor } from './lib/inference'
+import { MURMUR_MODELS, accountUrlFor, readUpstreams, upgradeUrlFor } from './lib/inference'
 import {
   DAY_MS,
   RATE_WINDOW_MS,
@@ -152,6 +152,7 @@ export const status = authedQuery({
         : { period: '', ...ZERO_MONTH },
       formattingPaused: false,
       upgradeUrl: upgradeUrlFor(process.env, planState),
+      accountUrl: accountUrlFor(process.env),
       window: null,
       meters: [],
       resets: null

@@ -184,6 +184,7 @@ describe('managed inference gateway', () => {
       usage: { period: '', sttSeconds: 0, sttRequests: 0, llmTokens: 0, llmRequests: 0 },
       formattingPaused: false,
       upgradeUrl: null,
+      accountUrl: null,
       window: null,
       meters: [],
       resets: null

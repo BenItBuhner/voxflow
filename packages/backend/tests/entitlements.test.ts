@@ -12,7 +12,7 @@ import {
   type DayUsage,
   type UsageSnapshot
 } from '../convex/lib/entitlements'
-import { transcriptWords, upgradeUrlFor } from '../convex/lib/inference'
+import { accountUrlFor, transcriptWords, upgradeUrlFor } from '../convex/lib/inference'
 import {
   DAY_MS,
   PLANS,
@@ -434,6 +434,12 @@ describe('request checks', () => {
     expect(upgradeUrlFor({ MURMUR_SITE_URL: 'https://murmur.app' }, 'pro')).toBeNull()
     expect(upgradeUrlFor({}, 'free')).toBeNull()
     expect(upgradeUrlFor({ MURMUR_SITE_URL: 'murmur.app' }, 'free')).toBeNull()
+    // The account page is for every plan, so Pro users can manage theirs from the apps.
+    expect(accountUrlFor({ MURMUR_SITE_URL: 'https://murmur.app/' })).toBe(
+      'https://murmur.app/account'
+    )
+    expect(accountUrlFor({})).toBeNull()
+    expect(accountUrlFor({ MURMUR_SITE_URL: 'murmur.app' })).toBeNull()
   })
 })
 
@@ -479,7 +485,8 @@ describe('gateway: free tier', () => {
         used: 500,
         allowed: 500,
         resetsAt: Date.UTC(2026, 8, 16),
-        upgradeUrl: `${SITE}/account?upgrade=yearly`
+        upgradeUrl: `${SITE}/account?upgrade=yearly`,
+        accountUrl: `${SITE}/account`
       }
     })
     expect(calls).toHaveLength(1)
@@ -617,7 +624,8 @@ describe('gateway: Pro fair use', () => {
       planState: 'pro',
       allowed: 108_000,
       resetsAt: OCTOBER,
-      upgradeUrl: null
+      upgradeUrl: null,
+      accountUrl: `${SITE}/account`
     })
 
     const format = await asAda.fetch(
@@ -635,7 +643,8 @@ describe('gateway: Pro fair use', () => {
       used: 108_061,
       allowed: 108_000,
       resetsAt: OCTOBER,
-      upgradeUrl: null
+      upgradeUrl: null,
+      accountUrl: `${SITE}/account`
     })
     // No model call, nothing billed for formatting.
     expect(calls).toHaveLength(1)
@@ -694,7 +703,8 @@ describe('gateway: Pro fair use', () => {
     expect(status).toMatchObject({
       plan: 'pro',
       planState: 'trial',
-      upgradeUrl: `${SITE}/account?upgrade=yearly`
+      upgradeUrl: `${SITE}/account?upgrade=yearly`,
+      accountUrl: `${SITE}/account`
     })
     expect(status.meters.map((m) => m.limit)).toEqual([
       'fairUseSttSecondsPerMonth',
@@ -865,6 +875,7 @@ describe('inference.status windows', () => {
     ])
     expect(status.resets).toEqual({ day: TOMORROW, week: TOMORROW, month: OCTOBER })
     expect(status.upgradeUrl).toBe(`${SITE}/account?upgrade=yearly`)
+    expect(status.accountUrl).toBe(`${SITE}/account`)
 
     // A later day sees the old days fall out of the window.
     const later = await asAda.query(api.inference.status, { day: '2026-09-15' })

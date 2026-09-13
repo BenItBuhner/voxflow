@@ -1,6 +1,11 @@
 import { autoTone } from '../../../text-engine/src/context'
 import { countWords } from '../../../text-engine/src/text'
-import type { AppCategory, DictionaryTerm, FormatContext, ResolvedTone } from '../../../text-engine/src/types'
+import type {
+  AppCategory,
+  DictionaryTerm,
+  FormatContext,
+  ResolvedTone
+} from '../../../text-engine/src/types'
 import type { Meter, Refusal } from './entitlements'
 import type { Plan, PlanState } from './plans'
 
@@ -76,6 +81,12 @@ export function readSiteUrl(env: Env): string | null {
   return /^https?:\/\//i.test(raw) ? raw : null
 }
 
+/** The site's account page (plan, usage, billing portal); null only when the instance has no site. */
+export function accountUrlFor(env: Env): string | null {
+  const site = readSiteUrl(env)
+  return site ? `${site}/account` : null
+}
+
 /** Where an account that hit a limit goes to pay; null for paying accounts and instances without a site. */
 export function upgradeUrlFor(env: Env, state: PlanState): string | null {
   const site = readSiteUrl(env)
@@ -117,9 +128,16 @@ export function modelsPayload(upstreams: Upstreams): {
   object: 'list'
   data: Array<{ id: string; object: 'model'; owned_by: 'murmur'; capability: InferenceKind }>
 } {
-  const data: Array<{ id: string; object: 'model'; owned_by: 'murmur'; capability: InferenceKind }> = []
-  if (upstreams.stt) data.push({ id: MURMUR_MODELS.stt, object: 'model', owned_by: 'murmur', capability: 'stt' })
-  if (upstreams.llm) data.push({ id: MURMUR_MODELS.llm, object: 'model', owned_by: 'murmur', capability: 'llm' })
+  const data: Array<{
+    id: string
+    object: 'model'
+    owned_by: 'murmur'
+    capability: InferenceKind
+  }> = []
+  if (upstreams.stt)
+    data.push({ id: MURMUR_MODELS.stt, object: 'model', owned_by: 'murmur', capability: 'stt' })
+  if (upstreams.llm)
+    data.push({ id: MURMUR_MODELS.llm, object: 'model', owned_by: 'murmur', capability: 'llm' })
   return { object: 'list', data }
 }
 
@@ -157,7 +175,10 @@ export interface LimitDetail {
   used: number
   allowed: number
   resetsAt: number | null
+  /** Where to pay; null for paying accounts (they manage the plan at `accountUrl`). */
   upgradeUrl: string | null
+  /** The site's account page, whatever the plan; null only without a site URL. */
+  accountUrl: string | null
 }
 
 export function limitDetail(
@@ -173,7 +194,8 @@ export function limitDetail(
     used: meter.used,
     allowed: meter.allowed,
     resetsAt: meter.resetsAt,
-    upgradeUrl: upgradeUrlFor(env, planState)
+    upgradeUrl: upgradeUrlFor(env, planState),
+    accountUrl: accountUrlFor(env)
   }
 }
 
@@ -184,7 +206,13 @@ export function limitDetail(
 export function limitError(refusal: Refusal, plan: Plan, planState: PlanState, env: Env): Response {
   const headers: Record<string, string> = {}
   if (refusal.retryAfterSec) headers['retry-after'] = String(refusal.retryAfterSec)
-  return gatewayError(refusal.status, refusal.code, refusal.message, headers, limitDetail(refusal, plan, planState, env))
+  return gatewayError(
+    refusal.status,
+    refusal.code,
+    refusal.message,
+    headers,
+    limitDetail(refusal, plan, planState, env)
+  )
 }
 
 // ---- multipart/form-data ---------------------------------------------------------------------
@@ -298,7 +326,8 @@ export interface WavInfo {
 export function wavInfo(bytes: Uint8Array): WavInfo | null {
   if (bytes.length < 44) return null
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-  const tag = (at: number): string => String.fromCharCode(bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3])
+  const tag = (at: number): string =>
+    String.fromCharCode(bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3])
   if (tag(0) !== 'RIFF' || tag(8) !== 'WAVE') return null
   let offset = 12
   let sampleRate = 0
@@ -364,7 +393,10 @@ export const STT_PASSTHROUGH_FIELDS = new Set([
 export const MAX_COMPLETION_TOKENS = 4096
 
 /** Human-readable message for an upstream failure, without leaking the instance's credentials. */
-export function describeUpstreamFailure(status: number, body: string): { status: number; code: GatewayErrorCode; message: string } {
+export function describeUpstreamFailure(
+  status: number,
+  body: string
+): { status: number; code: GatewayErrorCode; message: string } {
   let detail = body.trim().slice(0, 300)
   try {
     const json = JSON.parse(body) as { error?: { message?: string } | string; message?: string }
@@ -375,13 +407,29 @@ export function describeUpstreamFailure(status: number, body: string): { status:
     // plain text
   }
   if (status === 401 || status === 403)
-    return { status: 502, code: 'upstream_auth', message: 'The speech provider behind this Murmur instance rejected its credentials' }
+    return {
+      status: 502,
+      code: 'upstream_auth',
+      message: 'The speech provider behind this Murmur instance rejected its credentials'
+    }
   if (status === 429)
-    return { status: 503, code: 'upstream_busy', message: 'The model provider is busy; try again in a moment' }
+    return {
+      status: 503,
+      code: 'upstream_busy',
+      message: 'The model provider is busy; try again in a moment'
+    }
   if (status === 400 || status === 404 || status === 422)
     // Passed through with the upstream's own words so clients can adapt (e.g. drop word timestamps).
-    return { status: 400, code: 'bad_request', message: detail || `Provider rejected the request (HTTP ${status})` }
-  return { status: 502, code: 'upstream_error', message: detail || `Provider error (HTTP ${status})` }
+    return {
+      status: 400,
+      code: 'bad_request',
+      message: detail || `Provider rejected the request (HTTP ${status})`
+    }
+  return {
+    status: 502,
+    code: 'upstream_error',
+    message: detail || `Provider error (HTTP ${status})`
+  }
 }
 
 // ---- /v1/format -------------------------------------------------------------------------------
@@ -419,17 +467,23 @@ const str = (value: unknown, max: number): string | undefined =>
   typeof value === 'string' && value.trim() ? value.slice(0, max) : undefined
 
 /** Validate a client body into a `FormatRequest`, or explain what is wrong with it. */
-export function parseFormatRequest(input: unknown): { ok: true; request: FormatRequest } | { ok: false; message: string } {
+export function parseFormatRequest(
+  input: unknown
+): { ok: true; request: FormatRequest } | { ok: false; message: string } {
   if (!input || typeof input !== 'object' || Array.isArray(input))
     return { ok: false, message: 'Body must be a JSON object' }
   const body = input as Record<string, unknown>
-  if (typeof body.transcript !== 'string') return { ok: false, message: '"transcript" must be a string' }
+  if (typeof body.transcript !== 'string')
+    return { ok: false, message: '"transcript" must be a string' }
   if (body.transcript.length > MAX_TRANSCRIPT_CHARS)
     return { ok: false, message: `"transcript" is longer than ${MAX_TRANSCRIPT_CHARS} characters` }
-  const ctx = body.context && typeof body.context === 'object' && !Array.isArray(body.context)
-    ? (body.context as Record<string, unknown>)
-    : {}
-  const category = CATEGORIES.has(ctx.category as AppCategory) ? (ctx.category as AppCategory) : 'unknown'
+  const ctx =
+    body.context && typeof body.context === 'object' && !Array.isArray(body.context)
+      ? (body.context as Record<string, unknown>)
+      : {}
+  const category = CATEGORIES.has(ctx.category as AppCategory)
+    ? (ctx.category as AppCategory)
+    : 'unknown'
   const tone = TONES.has(ctx.tone as ResolvedTone) ? (ctx.tone as ResolvedTone) : autoTone(category)
   const dictionary: DictionaryTerm[] = []
   if (Array.isArray(ctx.dictionary)) {
@@ -445,7 +499,9 @@ export function parseFormatRequest(input: unknown): { ok: true; request: FormatR
     }
   }
   const keepVerbatim = Array.isArray(ctx.keepVerbatim)
-    ? ctx.keepVerbatim.filter((k): k is string => typeof k === 'string' && !!k.trim()).slice(0, MAX_KEEP)
+    ? ctx.keepVerbatim
+        .filter((k): k is string => typeof k === 'string' && !!k.trim())
+        .slice(0, MAX_KEEP)
     : undefined
   return {
     ok: true,
