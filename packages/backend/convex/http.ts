@@ -1,6 +1,7 @@
 import { httpRouter } from 'convex/server'
 import { internal } from './_generated/api'
 import { httpAction } from './_generated/server'
+import { stripeWebhook } from './billing'
 import { chatCompletions, format, models, transcriptions } from './gateway'
 import { verifyClerkWebhook, WebhookVerificationError } from './lib/clerkWebhook'
 
@@ -15,6 +16,9 @@ http.route({ path: '/v1/audio/transcriptions', method: 'POST', handler: transcri
 http.route({ path: '/v1/chat/completions', method: 'POST', handler: chatCompletions })
 /** Murmur-native: the transcript in, the text to insert out (see gateway.ts `format`). */
 http.route({ path: '/v1/format', method: 'POST', handler: format })
+
+/** Stripe -> Convex subscription sync (see billing.ts `stripeWebhook` for the events and secret). */
+http.route({ path: '/stripe/webhook', method: 'POST', handler: stripeWebhook })
 
 /**
  * Clerk -> Convex user sync. Point a Clerk webhook endpoint at
