@@ -202,16 +202,34 @@ quota, whatever a retry costs in tokens.
 | `MURMUR_INFERENCE_STT_URL`, `MURMUR_INFERENCE_STT_KEY`, `MURMUR_INFERENCE_STT_MODEL` | OpenAI-compatible speech-to-text upstream (e.g. `https://api.groq.com/openai/v1`, a key, `whisper-large-v3-turbo`). |
 | `MURMUR_INFERENCE_LLM_URL`, `MURMUR_INFERENCE_LLM_KEY`, `MURMUR_INFERENCE_LLM_MODEL` | OpenAI-compatible chat upstream for smart formatting. |
 | `MURMUR_INFERENCE_STT_PRO_MODEL`, `MURMUR_INFERENCE_LLM_PRO_MODEL` | Optional better models for `pro` accounts. |
+| `MURMUR_SITE_URL` | Origin of the website (`https://…`): where limit errors send people to upgrade and where Stripe returns them after Checkout. |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY` | Pro billing (see below). Without them billing is off and the account page says so. |
 
 A kind is offered only when its URL and model are set; an instance without them tells the apps so,
-and they fall back to the user's own provider. Every account starts on the **free** plan; an operator
-(or a billing webhook) moves it to **pro** with `internal.users.setPlan` from the Convex dashboard.
-Tiers, defined in [`packages/backend/convex/lib/plans.ts`](packages/backend/convex/lib/plans.ts),
-set the monthly minutes of transcription, formatting tokens and requests per minute (free: 120 min,
-500k tokens, 20/min; pro: 100 h, 25M tokens, 60/min). Usage is counted per account and UTC month,
-checked before a request is forwarded and billed only after the provider answered; the apps show
-the plan and the month's usage under Models and Account. Clips are limited to ten minutes
-(Convex caps HTTP bodies at 20 MB).
+and they fall back to the user's own provider. Every account starts a **14-day Pro trial** with no
+card (`planState: trial`), then drops to the residual **free** tier; a Stripe subscription (or the
+operator, with `internal.users.setPlan` from the Convex dashboard: `trial` restarts the 14 days)
+makes it **pro**. Tiers are defined in
+[`packages/backend/convex/lib/plans.ts`](packages/backend/convex/lib/plans.ts): the free tier gets
+500 words per rolling 7 UTC days plus guardrails (7 audio-min/week, 12 dictations/day, 60 s clips,
+20 req/min, 120 min and 500k tokens a month as backstops); trial and Pro get unlimited words behind
+fair use (soft 30 audio-hours/month: the formatting model pauses and `/v1/format` answers rule-based
+text at 20 req/min; hard 60 h: transcription pauses), 10-minute clips, 60 req/min and 25M tokens a
+month. Usage is counted per account per UTC day (`inferenceDays`: words from the transcript, audio
+seconds, request counts) and per UTC month, checked before a request is forwarded and billed only
+after the provider answered. A refused request carries the existing `error.code` plus `limit`,
+`used`, `allowed`, `resetsAt`, `plan`, `planState` and `upgradeUrl`; `inference.status` takes the
+client's UTC `day` and returns the meters and reset times. After deploying the trial for the first
+time run `npx convex run entitlements:backfillTrials` once: existing accounts get their 14 days
+from that moment.
+
+**Billing.** `billing.createCheckoutSession` and `billing.createPortalSession` (authed actions)
+return Stripe URLs the website opens; the webhook at `https://<deployment>.convex.site/stripe/webhook`
+(events `checkout.session.completed`, `customer.subscription.updated`,
+`customer.subscription.deleted`, `invoice.payment_failed`) is the only writer of the plan. Create two
+recurring prices in Stripe ($7.50/month and $72/year, no Stripe trial: the trial happens in-product),
+switch on the Customer Portal, and set the four `STRIPE_*` variables plus `MURMUR_SITE_URL` on the
+deployment.
 
 ### Setting up an instance
 

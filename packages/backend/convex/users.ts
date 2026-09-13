@@ -1,8 +1,8 @@
 import { v } from 'convex/values'
 import { internalMutation } from './_generated/server'
 import { authedMutation, authedQuery } from './lib/functions'
-import { planValidator } from './lib/plans'
-import { findUserByClerkId, purgeUserData, toUserDto, upsertUser } from './lib/users'
+import { planStateValidator } from './lib/plans'
+import { findUserByClerkId, grantTrial, purgeUserData, toUserDto, upsertUser } from './lib/users'
 import { userDtoValidator } from './lib/validators'
 
 /** Current onboarding flow revision. Bump to send everyone through new account-level steps. */
@@ -80,15 +80,19 @@ export const upsertFromClerk = internalMutation({
 })
 
 /**
- * Move an account to another tier. Internal on purpose: run it from the Convex dashboard or from a
- * billing webhook; the account itself can never change its own plan.
+ * Move an account to another state by hand. Internal on purpose: run it from the Convex dashboard
+ * (support, a comped account); Stripe drives the state through the billing webhook, and the
+ * account itself can never change its own plan. `trial` starts a fresh 14 days.
  */
 export const setPlan = internalMutation({
-  args: { clerkId: v.string(), plan: planValidator },
+  args: { clerkId: v.string(), plan: planStateValidator },
   returns: userDtoValidator,
   handler: async (ctx, args) => {
     const now = Date.now()
     const user = await upsertUser(ctx, args.clerkId, {}, now)
+    if (args.plan === 'trial') {
+      return toUserDto(await grantTrial(ctx, { ...user, plan: 'trial' }, now))
+    }
     if (user.plan !== args.plan) {
       await ctx.db.patch('users', user._id, { plan: args.plan, updatedAt: now })
     }

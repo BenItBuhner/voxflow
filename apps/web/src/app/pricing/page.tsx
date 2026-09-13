@@ -31,15 +31,22 @@ export default function PricingPage() {
       <Section className="pt-0 sm:pt-0">
         <Plans />
         <p className="mx-auto mt-8 max-w-2xl text-center text-note text-muted-foreground">
-          Pro checkout is not open yet: today every account is on the free tier, and this page shows
-          the plan it grows into. Prices in USD. Your plan and this month’s usage are on your{' '}
+          Prices in USD, billed by card through Stripe. Your plan, the days left in your trial and
+          your usage against each limit are on your{' '}
           <Link
             href="/account"
             className="text-foreground/80 underline decoration-foreground/30 underline-offset-4 hover:text-foreground"
           >
             account page
           </Link>
-          .
+          , which is also where you cancel. The{' '}
+          <Link
+            href="/terms"
+            className="text-foreground/80 underline decoration-foreground/30 underline-offset-4 hover:text-foreground"
+          >
+            terms
+          </Link>{' '}
+          spell out fair use and refunds.
         </p>
       </Section>
 
