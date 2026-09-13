@@ -14,87 +14,19 @@ import {
   upstreamModelFor,
   wavInfo
 } from '../convex/lib/inference'
-import { MAX_CLIP_SECONDS, PLANS, usagePeriod } from '../convex/lib/plans'
-import { ada, bob, setup } from './helpers'
-
-/** A PCM WAV header followed by `seconds` of silence. */
-function makeWav(seconds: number, sampleRate = 16_000, channels = 1, bits = 16): Uint8Array {
-  const dataBytes = Math.round(seconds * sampleRate * channels * (bits / 8))
-  const out = new Uint8Array(44 + dataBytes)
-  const view = new DataView(out.buffer)
-  const tag = (at: number, s: string): void => {
-    for (let i = 0; i < 4; i++) out[at + i] = s.charCodeAt(i)
-  }
-  tag(0, 'RIFF')
-  view.setUint32(4, 36 + dataBytes, true)
-  tag(8, 'WAVE')
-  tag(12, 'fmt ')
-  view.setUint32(16, 16, true)
-  view.setUint16(20, 1, true)
-  view.setUint16(22, channels, true)
-  view.setUint32(24, sampleRate, true)
-  view.setUint32(28, (sampleRate * channels * bits) / 8, true)
-  view.setUint16(32, (channels * bits) / 8, true)
-  view.setUint16(34, bits, true)
-  tag(36, 'data')
-  view.setUint32(40, dataBytes, true)
-  // Bytes that look like multipart syntax must survive inside the binary part.
-  const marker = new TextEncoder().encode('\r\n--boundary--\r\n')
-  if (dataBytes > marker.length * 2) out.set(marker, 44 + Math.floor(dataBytes / 2))
-  return out
-}
-
-const STT_ENV = {
-  MURMUR_INFERENCE_STT_URL: 'https://stt.example.test/v1/',
-  MURMUR_INFERENCE_STT_KEY: 'sk-stt-secret',
-  MURMUR_INFERENCE_STT_MODEL: 'whisper-large-v3-turbo'
-}
-const LLM_ENV = {
-  MURMUR_INFERENCE_LLM_URL: 'https://llm.example.test/v1',
-  MURMUR_INFERENCE_LLM_KEY: 'sk-llm-secret',
-  MURMUR_INFERENCE_LLM_MODEL: 'llama-3.1-8b-instant',
-  MURMUR_INFERENCE_LLM_PRO_MODEL: 'llama-3.3-70b-versatile'
-}
-
-function stubEnv(vars: Record<string, string>): void {
-  for (const [k, v] of Object.entries(vars)) vi.stubEnv(k, v)
-}
-
-interface Captured {
-  url: string
-  init: RequestInit
-}
-
-/** Replace global fetch with a recorder that answers with `respond`. */
-function stubFetch(respond: (url: string, init: RequestInit) => Response | Promise<Response>): Captured[] {
-  const calls: Captured[] = []
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
-      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
-      calls.push({ url, init })
-      return await respond(url, init)
-    })
-  )
-  return calls
-}
-
-const jsonResponse = (body: unknown, status = 200): Response =>
-  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
-
-async function sttRequest(wav: Uint8Array, extra: Record<string, string | string[]> = {}, model = 'murmur-transcribe'): Promise<RequestInit> {
-  const form = new FormData()
-  form.append('file', new Blob([wav as BlobPart], { type: 'audio/wav' }), 'audio.wav')
-  form.append('model', model)
-  for (const [k, v] of Object.entries(extra)) for (const value of Array.isArray(v) ? v : [v]) form.append(k, value)
-  // Let the platform serialize the multipart body and pick the boundary, as the apps do.
-  const req = new Request('https://client.test/', { method: 'POST', body: form })
-  return {
-    method: 'POST',
-    headers: { 'content-type': req.headers.get('content-type')! },
-    body: await req.arrayBuffer()
-  }
-}
+import { MAX_CLIP_SECONDS, PLANS, TRIAL_MS, usagePeriod } from '../convex/lib/plans'
+import {
+  LLM_ENV,
+  STT_ENV,
+  ada,
+  bob,
+  jsonResponse,
+  makeWav,
+  setup,
+  sttRequest,
+  stubEnv,
+  stubFetch
+} from './helpers'
 
 afterEach(() => {
   vi.unstubAllEnvs()
@@ -230,18 +162,41 @@ describe('managed inference gateway', () => {
     expect(status.plan).toBe('free')
   })
 
-  it('lists the managed models and the free allowance for a fresh account', async () => {
+  it('lists the managed models and the trial (Pro) allowance for a fresh account', async () => {
     const t = setup()
     const asAda = t.withIdentity(ada)
     const models = await (await asAda.fetch('/v1/models')).json()
     expect(models.data.map((m: { id: string }) => m.id)).toEqual(['murmur-transcribe', 'murmur-format'])
+    const before = Date.now()
+    await asAda.mutation(api.users.ensure, {})
     const status = await asAda.query(api.inference.status, {})
     expect(status).toMatchObject({
       available: true,
       models: { stt: 'murmur-transcribe', llm: 'murmur-format' },
-      plan: 'free',
-      limits: { ...PLANS.free, maxClipSeconds: MAX_CLIP_SECONDS },
-      usage: { period: '', sttSeconds: 0, sttRequests: 0, llmTokens: 0, llmRequests: 0 }
+      plan: 'pro',
+      planState: 'trial',
+      limits: {
+        sttSecondsPerMonth: PLANS.pro.sttSecondsPerMonth,
+        llmTokensPerMonth: PLANS.pro.llmTokensPerMonth,
+        requestsPerMinute: PLANS.pro.requestsPerMinute,
+        maxClipSeconds: MAX_CLIP_SECONDS
+      },
+      usage: { period: '', sttSeconds: 0, sttRequests: 0, llmTokens: 0, llmRequests: 0 },
+      formattingPaused: false,
+      upgradeUrl: null,
+      window: null,
+      meters: [],
+      resets: null
+    })
+    expect(status.trialEndsAt).toBeGreaterThanOrEqual(before + TRIAL_MS)
+    // Without `day` nothing windowed is computed; the free-tier meters come with it (see entitlements.test.ts).
+    await t.mutation(internal.users.setPlan, { clerkId: 'user_ada', plan: 'free' })
+    const free = await asAda.query(api.inference.status, {})
+    expect(free.limits).toEqual({
+      sttSecondsPerMonth: PLANS.free.sttSecondsPerMonth,
+      llmTokensPerMonth: PLANS.free.llmTokensPerMonth,
+      requestsPerMinute: PLANS.free.requestsPerMinute,
+      maxClipSeconds: PLANS.free.maxClipSeconds
     })
   })
 
@@ -355,7 +310,7 @@ describe('managed inference gateway', () => {
     const calls = stubFetch(() => jsonResponse({ text: 'ok', duration: 60 }))
     const t = setup()
     const asAda = t.withIdentity(ada)
-    const user = await asAda.mutation(api.users.ensure, {})
+    const user = await t.mutation(internal.users.setPlan, { clerkId: 'user_ada', plan: 'free' })
     const period = usagePeriod(Date.now())
     // Nearly out of minutes: the next 60 s clip does not fit.
     await t.run(async (ctx) => {
@@ -401,7 +356,7 @@ describe('managed inference gateway', () => {
 
     // A pro account has a larger allowance and is not throttled at the free rate.
     await t.mutation(internal.users.setPlan, { clerkId: 'user_ada', plan: 'pro' })
-    expect((await asAda.query(api.users.me, {}))?.plan).toBe('pro')
+    expect((await asAda.query(api.users.me, {}))).toMatchObject({ plan: 'pro', planState: 'pro' })
     const pro = await asAda.fetch('/v1/audio/transcriptions', await sttRequest(makeWav(5)))
     expect(pro.status).toBe(200)
     expect(calls).toHaveLength(1)
@@ -448,6 +403,7 @@ describe('managed inference gateway', () => {
     )
     const t = setup()
     const asAda = t.withIdentity(ada)
+    await t.mutation(internal.users.setPlan, { clerkId: 'user_ada', plan: 'free' })
     const res = await asAda.fetch('/v1/chat/completions', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -577,6 +533,7 @@ describe('POST /v1/format', () => {
     const calls = stubFetch(() => chat('The budget is $1,200,000.'))
     const t = setup()
     const asAda = t.withIdentity(ada)
+    await t.mutation(internal.users.setPlan, { clerkId: 'user_ada', plan: 'free' })
     const res = await asAda.fetch(
       '/v1/format',
       body('um the budget is one million two hundred thousand dollars', {
@@ -653,6 +610,7 @@ describe('POST /v1/format', () => {
     expect((await t.fetch('/v1/format', body('hello'))).status).toBe(401)
     const asAda = t.withIdentity(ada)
     expect((await asAda.fetch('/v1/format', body('hello'))).status).toBe(503)
+    await t.mutation(internal.users.setPlan, { clerkId: 'user_ada', plan: 'free' })
     stubEnv(LLM_ENV)
     stubFetch(() => chat('Hello.'))
     expect((await asAda.fetch('/v1/format', { method: 'POST', headers, body: 'nope' })).status).toBe(400)
