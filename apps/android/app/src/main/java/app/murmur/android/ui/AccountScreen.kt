@@ -176,15 +176,16 @@ fun planDescription(inference: InferenceView): String {
         "pro" -> if (inference.formattingPaused)
             "Unlimited dictation within fair use. The formatting model is paused for the rest of this month; your text is still transcribed and tidied by rules."
         else
-            "Unlimited dictation within fair use: the meters below show how far this month has come."
+            "Unlimited dictation within fair use: the meters below show how far this month has come. Invoices, the card and cancellation live on your account page."
         else -> "A weekly allowance of free words and speech, a handful of dictations a day, clips up to a minute. Upgrade for unlimited dictation, or connect your own provider under Speech model."
     }
 }
 
 /**
  * The account's plan: where it stands (trial, free, Pro), how much of each allowance is used and
- * when it comes back, and the one action that changes it. Upgrade opens the web account page in
- * the browser; the instance sends that link only while an upgrade applies, so Pro sees no button.
+ * when it comes back, and the actions on it: Upgrade (the instance's upgrade page, sent only while
+ * an upgrade applies) and Manage plan (the web account page, for Pro and the trial), both opened in
+ * the browser. An instance without a site URL sends neither link and gets neither button.
  */
 @Composable
 fun PlanGroup(inference: InferenceView) {
@@ -193,7 +194,7 @@ fun PlanGroup(inference: InferenceView) {
     val open: (String?) -> Unit = { url ->
         if (url != null) runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
     }
-    val upgrade = inference.upgradeUrl?.takeIf { inference.planState != "pro" }
+    val actions = inference.planActions
     val paused = inference.meters.firstOrNull { it.limit == "fairUseSttSecondsPerMonth" }
     Group(rows = true) {
         ControlRow(inference.planTitle, description = planDescription(inference)) {
@@ -246,9 +247,10 @@ fun PlanGroup(inference: InferenceView) {
                 Text(inference.minutesLabel ?: "", style = Murmur.type.labelSmall, color = c.inkSoft)
             }
         }
-        if (upgrade != null) {
-            Row(Modifier.padding(top = 4.dp, bottom = Space.row)) {
-                PrimaryButton("Upgrade", onClick = { open(upgrade) })
+        if (actions.upgrade != null || actions.manage != null) {
+            Row(Modifier.padding(top = 4.dp, bottom = Space.row), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                actions.upgrade?.let { url -> PrimaryButton("Upgrade", onClick = { open(url) }) }
+                actions.manage?.let { url -> SecondaryButton("Manage plan", onClick = { open(url) }) }
             }
         }
     }

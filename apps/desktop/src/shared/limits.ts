@@ -16,8 +16,29 @@ export interface LimitNotice {
   resetsAt: number | null
   /** The web account page that starts an upgrade; null when already Pro or the instance has no site. */
   upgradeUrl: string | null
+  /** The web account page itself; null when the instance has no site. */
+  accountUrl: string | null
   /** The gateway's own sentence. */
   message: string
+}
+
+/** The web pages an account can be sent to, when the instance offers them. */
+export interface PlanLinks {
+  planState: PlanState
+  upgradeUrl: string | null
+  accountUrl: string | null
+}
+
+/**
+ * The buttons the plan row shows: Upgrade for anyone who could, Manage plan for anyone who has a
+ * plan to manage (Pro, and a trial that will become one). Each only when the instance sent its
+ * page; an instance without a site URL sends null and gets no button.
+ */
+export function planActions(links: PlanLinks): { upgrade: string | null; manage: string | null } {
+  return {
+    upgrade: links.planState !== 'pro' ? links.upgradeUrl || null : null,
+    manage: links.planState !== 'free' ? links.accountUrl || null : null
+  }
 }
 
 const LIMIT_NAMES: ReadonlySet<string> = new Set<LimitName>([
@@ -54,6 +75,7 @@ export function parseLimitNotice(source: unknown, message?: string): LimitNotice
     allowed: typeof o.allowed === 'number' && Number.isFinite(o.allowed) ? o.allowed : 0,
     resetsAt: typeof o.resetsAt === 'number' && Number.isFinite(o.resetsAt) ? o.resetsAt : null,
     upgradeUrl: typeof o.upgradeUrl === 'string' && o.upgradeUrl ? o.upgradeUrl : null,
+    accountUrl: typeof o.accountUrl === 'string' && o.accountUrl ? o.accountUrl : null,
     message: message ?? (typeof o.message === 'string' ? o.message : '')
   }
 }

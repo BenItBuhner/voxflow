@@ -37,6 +37,8 @@ export interface InferenceView {
   resets: UsageResets | null
   /** The web page that starts an upgrade, or null when the instance offers none (hide the button). */
   upgradeUrl: string | null
+  /** The web account page (plan, invoices, cancellation), or null when the instance has no site. */
+  accountUrl: string | null
   /** Pro past the soft fair-use cap: the formatting model is paused until the month resets. */
   formattingPaused: boolean
   /** Speech / formatting are ready to use for the resolved sources. */
@@ -77,6 +79,7 @@ export function useInference(): InferenceView {
       meters: usageMeters(status?.meters),
       resets: status?.resets ?? null,
       upgradeUrl,
+      accountUrl: status?.accountUrl ?? null,
       formattingPaused: status?.formattingPaused ?? false,
       sttReady: sttConfigured(settings, routing, signedIn),
       llmReady: llmConfigured(settings, routing, signedIn),

@@ -130,6 +130,8 @@ export interface InferenceStatus {
   formattingPaused?: boolean
   /** The web account page that starts an upgrade; null when the instance has no site URL. */
   upgradeUrl?: string | null
+  /** The web account page itself (plan, invoices, cancellation); null when the instance has no site URL. */
+  accountUrl?: string | null
   /** Null when the status was fetched without the client's UTC day. */
   window?: UsageWindow | null
   /** Empty when the status was fetched without the client's UTC day. */

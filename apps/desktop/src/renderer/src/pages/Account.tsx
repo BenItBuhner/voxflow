@@ -16,7 +16,13 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { CloudDevice, UsageMeter } from '@shared/cloud'
-import { formatResetTime, meterLabel, meterValue, planStateLabel } from '@shared/limits'
+import {
+  formatResetTime,
+  meterLabel,
+  meterValue,
+  planActions,
+  planStateLabel
+} from '@shared/limits'
 import { Button } from '@renderer/components/ui/button'
 import { Switch } from '@renderer/components/ui/switch'
 import { Badge, Banner } from '@renderer/components/ui/misc'
@@ -329,7 +335,7 @@ function planDescription(inference: InferenceView): string {
     case 'pro':
       return inference.formattingPaused
         ? 'Unlimited dictation within fair use. The formatting model is paused for the rest of this month; your text is still transcribed and tidied by rules.'
-        : 'Unlimited dictation within fair use: the meters below show how far this month has come.'
+        : 'Unlimited dictation within fair use: the meters below show how far this month has come. Invoices, the card and cancellation live on your account page.'
     default:
       return 'A weekly allowance of free words and speech, a handful of dictations a day, clips up to a minute. Upgrade for unlimited dictation, or connect your own provider under Models.'
   }
@@ -337,14 +343,15 @@ function planDescription(inference: InferenceView): string {
 
 /**
  * The account's plan: where it stands (trial, free, Pro), how much of each allowance is used and
- * when it comes back, and the one action that changes it. Upgrade opens the web account page; the
- * instance sends that link only while an upgrade applies, so Pro sees no button.
+ * when it comes back, and the actions on it: Upgrade (the instance's upgrade page, sent only while
+ * an upgrade applies) and Manage plan (the web account page, for Pro and the trial). An instance
+ * without a site URL sends neither link and gets neither button.
  */
 function PlanSection({ inference }: { inference: InferenceView }): React.JSX.Element {
   const open = (url: string | null): void => {
     if (url) void window.murmur.app.openExternal(url)
   }
-  const upgrade = inference.planState !== 'pro' ? inference.upgradeUrl : null
+  const { upgrade, manage } = planActions(inference)
   const paused = inference.meters.find((m) => m.limit === 'fairUseSttSecondsPerMonth')
   return (
     <Section
@@ -372,6 +379,11 @@ function PlanSection({ inference }: { inference: InferenceView }): React.JSX.Ele
         {upgrade && (
           <Button size="sm" onClick={() => open(upgrade)}>
             <Sparkles /> Upgrade
+          </Button>
+        )}
+        {manage && (
+          <Button variant="outline" size="sm" onClick={() => open(manage)}>
+            <Settings2 /> Manage plan
           </Button>
         )}
       </SettingRow>

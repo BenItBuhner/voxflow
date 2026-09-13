@@ -112,6 +112,8 @@ data class InferenceStatusDto(
     val formattingPaused: Boolean = false,
     /** The web account page that starts an upgrade; null when the instance has no site URL. */
     val upgradeUrl: String? = null,
+    /** The web account page itself (plan, invoices, cancellation); null when the instance has no site URL. */
+    val accountUrl: String? = null,
     val window: UsageWindowDto? = null,
     val meters: List<UsageMeterDto> = emptyList(),
     val resets: UsageResetsDto? = null

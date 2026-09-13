@@ -179,6 +179,7 @@ const inference = {
           allowed: 108_000,
           resetsAt: NOW + 10 * 86_400_000,
           upgradeUrl: null,
+          accountUrl: 'https://murmur.app/account',
           message: 'fair use'
         }
       }

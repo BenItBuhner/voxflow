@@ -14,6 +14,7 @@ import app.murmur.android.cloud.UsageMeterDto
 import app.murmur.android.inference.Inference
 import app.murmur.android.inference.InferenceRouting
 import app.murmur.android.inference.Limits
+import app.murmur.android.inference.PlanActions
 import app.murmur.android.settings.InferenceSource
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SttKind
@@ -54,6 +55,12 @@ data class InferenceView(
 
     /** The web page that starts an upgrade, or null when the instance offers none (hide the button). */
     val upgradeUrl: String? get() = status?.upgradeUrl
+
+    /** The web account page (plan, invoices, cancellation), or null when the instance has no site. */
+    val accountUrl: String? get() = status?.accountUrl
+
+    /** Which of Upgrade and Manage plan the account gets, with the page each opens. */
+    val planActions: PlanActions get() = Limits.planActions(planState, upgradeUrl, accountUrl)
 
     /** Pro past the soft fair-use cap: the formatting model is paused until the month resets. */
     val formattingPaused: Boolean get() = status?.formattingPaused == true

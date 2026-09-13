@@ -3,9 +3,13 @@ package app.murmur.android
 import app.murmur.android.cloud.InferenceStatusDto
 import app.murmur.android.cloud.UsageMeterDto
 import app.murmur.android.cloud.UserDto
+import app.murmur.android.inference.InferenceRouting
 import app.murmur.android.inference.LimitNotice
 import app.murmur.android.inference.LimitStage
 import app.murmur.android.inference.Limits
+import app.murmur.android.inference.PlanActions
+import app.murmur.android.settings.InferenceSource
+import app.murmur.android.ui.InferenceView
 import app.murmur.android.stt.SttErrorKind
 import app.murmur.android.stt.errorFromResponse
 import app.murmur.android.stt.parseErrorBody
@@ -22,6 +26,7 @@ import java.util.Calendar
 import java.util.TimeZone
 
 private const val UPGRADE = "https://murmur.app/account?upgrade=yearly"
+private const val ACCOUNT = "https://murmur.app/account"
 
 /** Sun 13 Sep 2026, noon UTC. */
 private val NOW: Long = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
@@ -43,6 +48,7 @@ private fun refusal(vararg overrides: Pair<String, Any?>): String {
         .put("allowed", 500)
         .put("resetsAt", NOW + 2 * DAY)
         .put("upgradeUrl", UPGRADE)
+        .put("accountUrl", ACCOUNT)
     for ((k, v) in overrides) if (v == null) error.put(k, JSONObject.NULL) else error.put(k, v)
     return JSONObject().put("error", error).toString()
 }
@@ -55,7 +61,7 @@ class LimitsTest {
         val parsed = parseErrorBody(refusal())
         assertEquals("quota_exceeded", parsed.code)
         assertEquals(
-            LimitNotice("wordsPerWeek", "free", "free", 503.0, 500.0, NOW + 2 * DAY, UPGRADE, "This week's 500 free words are used up."),
+            LimitNotice("wordsPerWeek", "free", "free", 503.0, 500.0, NOW + 2 * DAY, UPGRADE, ACCOUNT, "This week's 500 free words are used up."),
             parsed.limit
         )
         val e = errorFromResponse(429, refusal())
@@ -73,6 +79,11 @@ class LimitsTest {
         assertEquals("maxClipSeconds", clip.limit?.limit)
         assertNull(clip.limit?.resetsAt)
         assertNull(clip.limit?.upgradeUrl)
+        assertEquals(ACCOUNT, clip.limit?.accountUrl)
+        // An instance without a site URL sends null for both pages.
+        val siteless = errorFromResponse(429, refusal("upgradeUrl" to null, "accountUrl" to null))
+        assertNull(siteless.limit?.upgradeUrl)
+        assertNull(siteless.limit?.accountUrl)
 
         // A rate limit carries a notice but is not a plan limit: the ordinary error treatment.
         val rate = errorFromResponse(429, refusal("code" to "rate_limited", "limit" to "requestsPerMinute", "used" to 20, "allowed" to 20))
@@ -88,7 +99,7 @@ class LimitsTest {
         assertNull(LimitNotice.fromJson(null))
         // Missing details default sensibly; the tier falls back to the plan.
         assertEquals(
-            LimitNotice("dictationsPerDay", "pro", "pro", 0.0, 0.0, null, null, ""),
+            LimitNotice("dictationsPerDay", "pro", "pro", 0.0, 0.0, null, null, null, ""),
             LimitNotice.fromJson(JSONObject().put("limit", "dictationsPerDay").put("plan", "pro"))
         )
     }
@@ -132,7 +143,7 @@ class LimitsTest {
 
     @Test
     fun `Pro is not sold Pro`() {
-        val pro = LimitNotice("sttSecondsPerMonth", "pro", "pro", 216_000.0, 216_000.0, utc(2026, Calendar.OCTOBER, 1), null, "")
+        val pro = LimitNotice("sttSecondsPerMonth", "pro", "pro", 216_000.0, 216_000.0, utc(2026, Calendar.OCTOBER, 1), null, ACCOUNT, "")
         val cap = Limits.describe(pro, NOW)
         assertEquals("This month's fair-use cap is reached", cap.title)
         assertEquals("60 h a month on Pro · resets on 1 Oct", cap.detail)
@@ -198,6 +209,24 @@ class LimitsTest {
         assertEquals(1, Limits.trialDaysLeft((NOW + 1).toDouble(), NOW))
         assertEquals(0, Limits.trialDaysLeft((NOW - 5).toDouble(), NOW))
         assertEquals(0, Limits.trialDaysLeft(null, NOW))
+    }
+
+    @Test
+    fun `Upgrade and Manage plan go only to whom they apply, and only with a page to open`() {
+        assertEquals(PlanActions(UPGRADE, ACCOUNT), Limits.planActions("trial", UPGRADE, ACCOUNT))
+        assertEquals(PlanActions(UPGRADE, null), Limits.planActions("free", UPGRADE, ACCOUNT))
+        assertEquals(PlanActions(null, ACCOUNT), Limits.planActions("pro", null, ACCOUNT))
+        // No site URL on the instance: nothing to open, so no buttons at all.
+        for (state in listOf("trial", "free", "pro")) assertEquals(PlanActions(null, null), Limits.planActions(state, null, null))
+        assertEquals(PlanActions(null, null), Limits.planActions("pro", "", ""))
+        // The view folds the status in; an older instance without the field is the same as null.
+        val view = InferenceView(
+            cloudEnabled = true, managedAvailable = true, routing = InferenceRouting(InferenceSource.MURMUR, InferenceSource.MURMUR),
+            signedIn = true, status = InferenceStatusDto(plan = "pro", planState = "pro"), plan = "pro", planState = "pro",
+            trialDaysLeft = 0, sttReady = true, llmReady = true
+        )
+        assertEquals(PlanActions(null, null), view.planActions)
+        assertEquals(PlanActions(null, ACCOUNT), view.copy(status = view.status?.copy(accountUrl = ACCOUNT)).planActions)
     }
 
     @Test

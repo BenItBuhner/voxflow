@@ -64,7 +64,7 @@ class OverlayPillLimitTest {
 
     private val words = LimitNotice(
         limit = "wordsPerWeek", plan = "free", planState = "free", used = 503.0, allowed = 500.0,
-        resetsAt = System.currentTimeMillis() + 2 * 86_400_000L, upgradeUrl = UPGRADE,
+        resetsAt = System.currentTimeMillis() + 2 * 86_400_000L, upgradeUrl = UPGRADE, accountUrl = "https://murmur.app/account",
         message = "This week's 500 free words are used up."
     )
 

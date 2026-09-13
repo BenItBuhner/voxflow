@@ -25,6 +25,8 @@ data class LimitNotice(
     val resetsAt: Long?,
     /** The web account page that starts an upgrade; null when already Pro or the instance has no site. */
     val upgradeUrl: String?,
+    /** The web account page itself; null when the instance has no site. */
+    val accountUrl: String?,
     /** The gateway's own sentence. */
     val message: String
 ) {
@@ -50,6 +52,7 @@ data class LimitNotice(
                 allowed = source.optDouble("allowed", 0.0).takeIf { it.isFinite() } ?: 0.0,
                 resetsAt = if (source.isNull("resetsAt") || !source.has("resetsAt")) null else source.optDouble("resetsAt").takeIf { it.isFinite() }?.toLong(),
                 upgradeUrl = source.optString("upgradeUrl", "").takeIf { !source.isNull("upgradeUrl") && it.isNotEmpty() },
+                accountUrl = source.optString("accountUrl", "").takeIf { !source.isNull("accountUrl") && it.isNotEmpty() },
                 message = message ?: source.optString("message", "")
             )
         }
@@ -58,6 +61,9 @@ data class LimitNotice(
 
 /** How a limit is worded: what ran out, the allowance and its reset, whether upgrading helps. */
 data class LimitCopy(val title: String, val detail: String, val upgradeHelps: Boolean)
+
+/** The buttons the plan row shows: the pages to open, or null for no button. */
+data class PlanActions(val upgrade: String?, val manage: String?)
 
 /** What the limit stopped: a formatting limit never loses text (rules are applied instead). */
 enum class LimitStage { SPEECH, FORMATTING }
@@ -85,6 +91,16 @@ object Limits {
 
     /** "Pro trial", "Free plan", "Pro plan": the plan as a title. */
     fun planTitle(state: String): String = if (state == "trial") "Pro trial" else "${planStateLabel(state)} plan"
+
+    /**
+     * Upgrade for anyone who could, Manage plan for anyone who has a plan to manage (Pro, and a
+     * trial that will become one). Each only when the instance sent its page; an instance without
+     * a site URL sends null and gets no button.
+     */
+    fun planActions(planState: String, upgradeUrl: String?, accountUrl: String?): PlanActions = PlanActions(
+        upgrade = if (planState != "pro") upgradeUrl?.takeIf { it.isNotBlank() } else null,
+        manage = if (planState != "free") accountUrl?.takeIf { it.isNotBlank() } else null
+    )
 
     /** The account's plan state, from an instance that reports one or, failing that, from its tier. */
     fun planStateOf(status: InferenceStatusDto?, user: UserDto?): String {

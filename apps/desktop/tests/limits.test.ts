@@ -9,6 +9,7 @@ import {
   meterLabel,
   meterValue,
   parseLimitNotice,
+  planActions,
   planStateLabel,
   planStateOf,
   trialDaysLeft,
@@ -18,6 +19,7 @@ import {
 
 const NOW = Date.UTC(2026, 8, 13, 12, 0, 0) // Sun 13 Sep 2026, noon UTC
 const UPGRADE = 'https://murmur.app/account?upgrade=yearly'
+const ACCOUNT = 'https://murmur.app/account'
 
 /** A gateway refusal, as the contract spells it (internal/entitlements-contract.md). */
 function refusal(overrides: Partial<Record<string, unknown>> = {}): string {
@@ -33,6 +35,7 @@ function refusal(overrides: Partial<Record<string, unknown>> = {}): string {
       allowed: 500,
       resetsAt: NOW + 2 * 86_400_000,
       upgradeUrl: UPGRADE,
+      accountUrl: ACCOUNT,
       ...overrides
     }
   })
@@ -51,6 +54,7 @@ describe('limit notices from the gateway', () => {
       allowed: 500,
       resetsAt: NOW + 2 * 86_400_000,
       upgradeUrl: UPGRADE,
+      accountUrl: ACCOUNT,
       message: "This week's 500 free words are used up."
     })
     const err = errorFromResponse(429, refusal())
@@ -72,7 +76,15 @@ describe('limit notices from the gateway', () => {
         upgradeUrl: null
       })
     )
-    expect(clip.limit).toMatchObject({ limit: 'maxClipSeconds', resetsAt: null, upgradeUrl: null })
+    expect(clip.limit).toMatchObject({
+      limit: 'maxClipSeconds',
+      resetsAt: null,
+      upgradeUrl: null,
+      accountUrl: ACCOUNT
+    })
+    // An instance without a site URL sends null for both pages.
+    const siteless = errorFromResponse(429, refusal({ upgradeUrl: null, accountUrl: null }))
+    expect(siteless.limit).toMatchObject({ upgradeUrl: null, accountUrl: null })
   })
 
   it('leave ordinary errors alone', () => {
@@ -92,6 +104,7 @@ describe('limit notices from the gateway', () => {
       allowed: 0,
       resetsAt: null,
       upgradeUrl: null,
+      accountUrl: null,
       message: ''
     })
   })
@@ -251,6 +264,35 @@ describe('plan state', () => {
     expect(planStateLabel('trial')).toBe('Pro trial')
     expect(planStateLabel('pro')).toBe('Pro')
     expect(planStateLabel('free')).toBe('Free')
+  })
+
+  it('offers Upgrade and Manage plan only to whom they apply, and only with a page to open', () => {
+    expect(planActions({ planState: 'trial', upgradeUrl: UPGRADE, accountUrl: ACCOUNT })).toEqual({
+      upgrade: UPGRADE,
+      manage: ACCOUNT
+    })
+    expect(planActions({ planState: 'free', upgradeUrl: UPGRADE, accountUrl: ACCOUNT })).toEqual({
+      upgrade: UPGRADE,
+      manage: null
+    })
+    expect(planActions({ planState: 'pro', upgradeUrl: null, accountUrl: ACCOUNT })).toEqual({
+      upgrade: null,
+      manage: ACCOUNT
+    })
+    // No site URL on the instance: nothing to open, so no buttons at all.
+    for (const planState of ['trial', 'free', 'pro'] as const) {
+      expect(planActions({ planState, upgradeUrl: null, accountUrl: null })).toEqual({
+        upgrade: null,
+        manage: null
+      })
+    }
+    // An older instance that never sent the field is the same as null.
+    expect(
+      planActions({ planState: 'pro', upgradeUrl: null, accountUrl: undefined as never })
+    ).toEqual({
+      upgrade: null,
+      manage: null
+    })
   })
 
   it('counts trial days the way the contract does', () => {
