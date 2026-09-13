@@ -11,6 +11,11 @@ const PRODUCT = [
   { href: '/account', label: 'Account' }
 ] as const
 
+const LEGAL = [
+  { href: '/privacy', label: 'Privacy' },
+  { href: '/terms', label: 'Terms' }
+] as const
+
 /** The footer is the page's rail: one tonal step below the canvas, no rule between them. */
 export function SiteFooter() {
   const source = [
@@ -22,7 +27,7 @@ export function SiteFooter() {
   return (
     <footer className="mt-auto bg-sidebar py-16">
       <Container>
-        <div className="grid gap-12 sm:grid-cols-[1.4fr_1fr_1fr]">
+        <div className="grid gap-12 sm:grid-cols-2 lg:grid-cols-[1.4fr_1fr_1fr_1fr]">
           <div className="max-w-xs">
             <Wordmark />
             <p className="mt-4 text-body text-muted-foreground">{SITE_TAGLINE}</p>
@@ -42,6 +47,15 @@ export function SiteFooter() {
                 <a href={item.href} className="footer-link" rel="noreferrer">
                   {item.label}
                 </a>
+              </li>
+            ))}
+          </FooterColumn>
+          <FooterColumn title="Legal">
+            {LEGAL.map((item) => (
+              <li key={item.href}>
+                <Link href={item.href} className="footer-link">
+                  {item.label}
+                </Link>
               </li>
             ))}
           </FooterColumn>
