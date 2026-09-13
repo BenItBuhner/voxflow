@@ -126,7 +126,7 @@ fun StyleScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) {
                 SourceChooser(
                     title = "Formatting model",
                     selected = if (inference.routing.murmurLlm) InferenceSource.MURMUR else InferenceSource.CUSTOM,
-                    murmurMeta = "${inference.planLabel} plan",
+                    murmurMeta = inference.planTitle,
                     ownLabel = "Your own model",
                     onSelect = { source ->
                         store.update { s ->
@@ -146,7 +146,7 @@ fun StyleScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) {
             if (inference.routing.murmurLlm) Group(if (inference.offersMurmur) null else "Formatting model", rows = true) {
                 ControlRow(
                     "Model",
-                    description = if (inference.signedIn) "Provided by this Murmur instance on the ${inference.planLabel} plan. It receives the raw transcript together with where the text is going, and its answer is verified before anything is inserted."
+                    description = if (inference.signedIn) "Provided by this Murmur instance on your ${inference.planTitle}. It receives the raw transcript together with where the text is going, and its answer is verified before anything is inserted."
                     else "Sign in to use Murmur models."
                 ) {
                     Text(inference.status?.models?.llm ?: Inference.LLM_MODEL, style = Murmur.type.labelSmall, color = c.inkSoft)
@@ -183,7 +183,7 @@ fun StyleScreen(store: SettingsStore, settings: MurmurSettings, nav: TopNav) {
                     value = settings.llmModel,
                     onValueChange = { store.update { s -> s.copy(llmModel = it) } },
                     label = "Model",
-                    placeholder = "llama-3.1-8b-instant",
+                    placeholder = "openai/gpt-oss-20b",
                     helper = "A small, fast instruct model. The rule-based cleanup always covers a slow or refused answer."
                 )
                 Spacer(Modifier.height(14.dp))

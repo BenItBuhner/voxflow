@@ -200,7 +200,7 @@ quota, whatever a retry costs in tokens.
 | Convex environment variable | Purpose |
 | --- | --- |
 | `MURMUR_INFERENCE_STT_URL`, `MURMUR_INFERENCE_STT_KEY`, `MURMUR_INFERENCE_STT_MODEL` | OpenAI-compatible speech-to-text upstream (e.g. `https://api.groq.com/openai/v1`, a key, `whisper-large-v3-turbo`). |
-| `MURMUR_INFERENCE_LLM_URL`, `MURMUR_INFERENCE_LLM_KEY`, `MURMUR_INFERENCE_LLM_MODEL` | OpenAI-compatible chat upstream for smart formatting. |
+| `MURMUR_INFERENCE_LLM_URL`, `MURMUR_INFERENCE_LLM_KEY`, `MURMUR_INFERENCE_LLM_MODEL` | OpenAI-compatible chat upstream for smart formatting (e.g. the same Groq URL, a key, `openai/gpt-oss-20b`; Groq retired `llama-3.1-8b-instant` and `llama-3.3-70b-versatile` on 2026-08-16). |
 | `MURMUR_INFERENCE_STT_PRO_MODEL`, `MURMUR_INFERENCE_LLM_PRO_MODEL` | Optional better models for `pro` accounts. |
 
 A kind is offered only when its URL and model are set; an instance without them tells the apps so,

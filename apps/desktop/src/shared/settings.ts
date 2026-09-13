@@ -1,7 +1,8 @@
 import { z } from 'zod'
+import { replacementModel } from './models'
 import { ACCENT_PRESET_IDS } from './theme'
 
-export const SETTINGS_VERSION = 3
+export const SETTINGS_VERSION = 4
 
 /**
  * Where a model runs: the Murmur instance's managed models (cloud builds only) or a provider the
@@ -247,10 +248,15 @@ export type SettingsInput = z.input<typeof settingsSchema>
  * v2 files carry the rule-based cleanup knobs (fillers, hesitations, repeats, lists, numbers,
  * model freedom, ...) that the engine no longer has. They are dropped by the schema; the model
  * instructions move from `formatting.llm.instructions` to `formatting.instructions`.
+ *
+ * v3 files may still name a model its provider has since retired (shared/models.ts). The model is
+ * swapped for the provider's recommended replacement once; a v4 file is the user's own choice and
+ * is left alone even if it names a retired id.
  */
 export function migrateSettings(raw: unknown): unknown {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return raw
   let input = raw as Record<string, unknown>
+  const version = typeof input.version === 'number' ? input.version : 0
   const stt = isRecord(input.stt) ? input.stt : undefined
   if (stt && stt.source === undefined && typeof stt.baseUrl === 'string' && stt.baseUrl.trim()) {
     const formatting = isRecord(input.formatting) ? input.formatting : {}
@@ -275,7 +281,38 @@ export function migrateSettings(raw: unknown): unknown {
     const { instructions, ...rest } = llm
     input = { ...input, formatting: { ...formatting, instructions, llm: rest } }
   }
+  if (version < 4) input = replaceRetiredModels(input)
   return input === raw ? raw : { ...input, version: SETTINGS_VERSION }
+}
+
+/**
+ * Move the speech model, its fallback and the formatting model off ids their provider retired.
+ * The formatting model is judged against the server it actually talks to ("same as speech" means
+ * the speech server). Returns the same object when nothing needed changing.
+ */
+function replaceRetiredModels(input: Record<string, unknown>): Record<string, unknown> {
+  const stt = isRecord(input.stt) ? input.stt : undefined
+  const formatting = isRecord(input.formatting) ? input.formatting : undefined
+  const llm = formatting && isRecord(formatting.llm) ? formatting.llm : undefined
+  const sttBaseUrl = typeof stt?.baseUrl === 'string' ? stt.baseUrl : ''
+  let out = input
+  if (stt && sttBaseUrl) {
+    let next = stt
+    for (const key of ['model', 'fallbackModel'] as const) {
+      const model = next[key]
+      const replacement = typeof model === 'string' ? replacementModel(sttBaseUrl, model) : null
+      if (replacement) next = { ...next, [key]: replacement }
+    }
+    if (next !== stt) out = { ...out, stt: next }
+  }
+  if (formatting && llm && typeof llm.model === 'string') {
+    const sameAsStt = llm.sameAsStt !== false
+    const baseUrl = sameAsStt ? sttBaseUrl : typeof llm.baseUrl === 'string' ? llm.baseUrl : ''
+    const replacement = baseUrl ? replacementModel(baseUrl, llm.model) : null
+    if (replacement)
+      out = { ...out, formatting: { ...formatting, llm: { ...llm, model: replacement } } }
+  }
+  return out
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -285,7 +322,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function parseSettings(raw: unknown): Settings {
   raw = migrateSettings(raw)
   const result = settingsSchema.safeParse(raw ?? {})
-  if (result.success) return result.data
+  // Whatever the file said, what comes out is at the current version: a later write records that
+  // every migration has run, so a choice the user makes afterwards is never migrated again.
+  if (result.success) return { ...result.data, version: SETTINGS_VERSION }
   // Salvage whatever validates by re-parsing section by section so one bad field
   // never wipes the whole configuration.
   const base = settingsSchema.parse({})
@@ -298,7 +337,7 @@ export function parseSettings(raw: unknown): Settings {
     const parsed = sectionSchema.safeParse(input[key])
     if (parsed.success) out[key] = parsed.data
   }
-  return settingsSchema.parse(out)
+  return settingsSchema.parse({ ...out, version: SETTINGS_VERSION })
 }
 
 export const defaultSettings = (): Settings => settingsSchema.parse({})

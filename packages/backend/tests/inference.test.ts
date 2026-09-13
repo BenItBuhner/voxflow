@@ -52,8 +52,8 @@ const STT_ENV = {
 const LLM_ENV = {
   MURMUR_INFERENCE_LLM_URL: 'https://llm.example.test/v1',
   MURMUR_INFERENCE_LLM_KEY: 'sk-llm-secret',
-  MURMUR_INFERENCE_LLM_MODEL: 'llama-3.1-8b-instant',
-  MURMUR_INFERENCE_LLM_PRO_MODEL: 'llama-3.3-70b-versatile'
+  MURMUR_INFERENCE_LLM_MODEL: 'openai/gpt-oss-20b',
+  MURMUR_INFERENCE_LLM_PRO_MODEL: 'openai/gpt-oss-120b'
 }
 
 function stubEnv(vars: Record<string, string>): void {
@@ -113,9 +113,9 @@ describe('inference helpers', () => {
       model: 'whisper-large-v3-turbo',
       proModel: undefined
     })
-    expect(both.llm?.proModel).toBe('llama-3.3-70b-versatile')
-    expect(upstreamModelFor(both.llm!, 'free')).toBe('llama-3.1-8b-instant')
-    expect(upstreamModelFor(both.llm!, 'pro')).toBe('llama-3.3-70b-versatile')
+    expect(both.llm?.proModel).toBe('openai/gpt-oss-120b')
+    expect(upstreamModelFor(both.llm!, 'free')).toBe('openai/gpt-oss-20b')
+    expect(upstreamModelFor(both.llm!, 'pro')).toBe('openai/gpt-oss-120b')
     expect(upstreamModelFor(both.stt!, 'pro')).toBe('whisper-large-v3-turbo')
     expect(modelsPayload(both).data.map((m) => m.id)).toEqual(['murmur-transcribe', 'murmur-format'])
     expect(modelsPayload(readUpstreams(STT_ENV)).data.map((m) => m.id)).toEqual(['murmur-transcribe'])
@@ -441,7 +441,7 @@ describe('managed inference gateway', () => {
     const calls = stubFetch(() =>
       jsonResponse({
         id: 'chatcmpl-1',
-        model: 'llama-3.1-8b-instant',
+        model: 'openai/gpt-oss-20b',
         choices: [{ message: { role: 'assistant', content: 'Hello there.' }, finish_reason: 'stop' }],
         usage: { prompt_tokens: 30, completion_tokens: 4, total_tokens: 34 }
       })
@@ -471,7 +471,7 @@ describe('managed inference gateway', () => {
     expect((calls[0].init.headers as Record<string, string>).authorization).toBe('Bearer sk-llm-secret')
     const sent = JSON.parse(calls[0].init.body as string)
     expect(sent).toEqual({
-      model: 'llama-3.1-8b-instant',
+      model: 'openai/gpt-oss-20b',
       stream: false,
       messages: [{ role: 'user', content: 'hello there' }],
       temperature: 0,
@@ -489,7 +489,7 @@ describe('managed inference gateway', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ model: 'murmur-format', messages: [{ role: 'user', content: 'again' }] })
     })
-    expect(JSON.parse(calls[1].init.body as string).model).toBe('llama-3.3-70b-versatile')
+    expect(JSON.parse(calls[1].init.body as string).model).toBe('openai/gpt-oss-120b')
   })
 
   it('rejects malformed chat requests', async () => {
@@ -594,7 +594,7 @@ describe('POST /v1/format', () => {
     expect(calls).toHaveLength(1)
     expect(calls[0].url).toBe('https://llm.example.test/v1/chat/completions')
     const sent = JSON.parse(calls[0].init.body as string)
-    expect(sent.model).toBe('llama-3.1-8b-instant')
+    expect(sent.model).toBe('openai/gpt-oss-20b')
     expect(sent.messages[0].role).toBe('system')
     const user = sent.messages[sent.messages.length - 1]
     expect(user.role).toBe('user')

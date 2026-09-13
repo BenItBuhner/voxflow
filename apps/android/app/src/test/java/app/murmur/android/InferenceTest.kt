@@ -44,7 +44,7 @@ class InferenceTest {
         sttModel = "whisper-large-v3-turbo",
         sttFallbackModel = "whisper-large-v3",
         llmSameAsStt = true,
-        llmModel = "llama-3.1-8b-instant"
+        llmModel = "openai/gpt-oss-20b"
     )
 
     private fun blank() = MurmurSettings(sttSource = InferenceSource.MURMUR, llmSource = InferenceSource.MURMUR, sttBaseUrl = "", sttModel = "", llmModel = "")
@@ -174,7 +174,7 @@ class InferenceTest {
         assertEquals("https://api.groq.com/openai/v1", stt.cfg.baseUrl)
         assertEquals("sk-own", stt.cfg.apiKey)
         val llm = h.router.llm()
-        assertEquals(LlmConfig("https://api.groq.com/openai/v1", "sk-own", "llama-3.1-8b-instant", 15_000), llm.cfg)
+        assertEquals(LlmConfig("https://api.groq.com/openai/v1", "sk-own", "openai/gpt-oss-20b", 15_000), llm.cfg)
         val blankLocal = Harness(local, blank(), tokens = listOf("nope"))
         assertEquals(InferenceSource.CUSTOM, blankLocal.router.stt().source)
         assertEquals(InferenceSource.CUSTOM, blankLocal.router.llm().source)

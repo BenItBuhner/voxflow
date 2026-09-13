@@ -1,3 +1,4 @@
+import { parseLimitNotice, type LimitNotice } from '@shared/limits'
 import type { SttProviderKind } from '@shared/settings'
 
 export interface SttConfig {
@@ -49,7 +50,9 @@ export class SttError extends Error {
     public readonly status?: number,
     public readonly suggestedModels: string[] = [],
     /** Machine-readable `error.code` from the server, when it sent one (the Murmur gateway does). */
-    public readonly code?: string
+    public readonly code?: string,
+    /** The plan limit a Murmur instance refused the request on, when that is what happened. */
+    public readonly limit?: LimitNotice
   ) {
     super(message)
     this.name = 'SttError'
@@ -81,14 +84,19 @@ export function combineSignals(timeoutMs: number, external?: AbortSignal): Abort
   return external ? AbortSignal.any([timeout, external]) : timeout
 }
 
-/** Pull a human-readable message, an error code and any "available models" hint out of an error body. */
+/**
+ * Pull a human-readable message, an error code, any "available models" hint and the Murmur
+ * gateway's structured limit out of an error body.
+ */
 export function parseErrorBody(body: string): {
   message: string
   suggestedModels: string[]
   code?: string
+  limit?: LimitNotice
 } {
   let message = body.trim().slice(0, 500)
   let code: string | undefined
+  let limit: LimitNotice | undefined
   try {
     const json = JSON.parse(body) as {
       error?: { message?: string; code?: string | number } | string
@@ -101,6 +109,7 @@ export function parseErrorBody(body: string): {
     else if (typeof json.detail === 'string') message = json.detail
     if (typeof json.error === 'object' && typeof json.error?.code === 'string')
       code = json.error.code
+    if (typeof json.error === 'object') limit = parseLimitNotice(json.error, message) ?? undefined
   } catch {
     // not JSON
   }
@@ -112,18 +121,19 @@ export function parseErrorBody(body: string): {
       if (id) suggested.push(id)
     }
   }
-  return { message, suggestedModels: suggested, code }
+  return { message, suggestedModels: suggested, code, limit }
 }
 
 /** Build the error for a non-2xx response from an OpenAI-style server. */
 export function errorFromResponse(status: number, body: string): SttError {
-  const { message, suggestedModels, code } = parseErrorBody(body)
+  const { message, suggestedModels, code, limit } = parseErrorBody(body)
   return new SttError(
     message || `HTTP ${status}`,
     classifyStatus(status, message),
     status,
     suggestedModels,
-    code
+    code,
+    limit
   )
 }
 

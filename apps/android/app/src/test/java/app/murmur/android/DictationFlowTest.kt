@@ -57,6 +57,9 @@ class DictationFlowTest {
     /** How many transcription requests the "server" still answers with a 500 before working. */
     @Volatile private var failures = 0
 
+    /** How many transcription requests the "server" still refuses on the free plan's weekly words. */
+    @Volatile private var refusals = 0
+
     @Before
     fun startMockStt() {
         server.dispatcher = object : Dispatcher() {
@@ -66,6 +69,14 @@ class DictationFlowTest {
                 if (failures > 0) {
                     failures--
                     return MockResponse().setResponseCode(500).setBody("""{"error":{"message":"upstream exploded"}}""")
+                }
+                if (refusals > 0) {
+                    refusals--
+                    return MockResponse().setResponseCode(429).setHeader("Retry-After", "172800").setBody(
+                        """{"error":{"type":"murmur_gateway_error","code":"quota_exceeded","message":"This week's 500 free words are used up.",
+                           "limit":"wordsPerWeek","plan":"free","planState":"free","used":503,"allowed":500,
+                           "resetsAt":${System.currentTimeMillis() + 172_800_000L},"upgradeUrl":"https://murmur.app/account?upgrade=yearly"}}"""
+                    )
                 }
                 return MockResponse()
                     .setHeader("Content-Type", "application/json")
@@ -173,6 +184,40 @@ class DictationFlowTest {
 
         // Nothing left to retry.
         assertNotNull(DictationController.retry(activity, retryId))
+    }
+
+    @Test
+    fun `a plan limit keeps the recording, explains itself on the pill and retries once it has reset`() {
+        val (activity, field) = setUpField()
+        val history = HistoryStore.get(activity)
+        val recordings = RecordingStore.get(activity)
+        refusals = 1
+
+        DictationController.start(activity)
+        DictationController.stopAndInsert(activity)
+        val refused = awaitOutcome(timeoutMs = 30_000)
+
+        assertTrue("expected an error, got $refused", refused is DictationState.Error)
+        refused as DictationState.Error
+        assertEquals("This week's 500 free words are used up.", refused.message)
+        val limit = refused.limit
+        assertNotNull("the pill carries the limit", limit)
+        assertEquals("wordsPerWeek", limit!!.limit)
+        assertEquals(503.0, limit.used, 0.0)
+        assertEquals(500.0, limit.allowed, 0.0)
+        assertEquals("https://murmur.app/account?upgrade=yearly", limit.upgradeUrl)
+        val retryId = refused.retryId
+        assertNotNull("the recording survives the refusal", retryId)
+        val entry = history.get(retryId!!)!!
+        assertTrue(entry.retryable)
+        assertTrue(recordings.has(entry.recording))
+        assertEquals("", field.text.toString())
+
+        // The limit has reset (or the route changed): the same audio goes through untouched.
+        assertNull(DictationController.retry(activity, retryId, insert = true))
+        assertEquals(DictationState.Success("Inserted"), awaitOutcome(timeoutMs = 30_000))
+        assertEquals(lightText(), field.text.toString())
+        assertEquals(2, history.get(retryId)!!.attempts)
     }
 
     @Test

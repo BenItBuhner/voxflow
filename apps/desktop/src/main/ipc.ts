@@ -198,6 +198,17 @@ export function registerIpc(deps: IpcDeps): void {
     void controller.retry(id, { inject: true })
   })
   ipcMain.on(IPC.overlayDismiss, () => overlay.dismiss())
+  // The limit pill's ways forward. The message is waved away as the user acts on it: the account
+  // page opens in the browser, or the Models page comes up to connect their own provider.
+  ipcMain.on(IPC.overlayOpenUrl, (_e, url: string) => {
+    if (typeof url !== 'string' || !/^https:\/\//.test(url)) return
+    void shell.openExternal(url)
+    overlay.dismiss()
+  })
+  ipcMain.on(IPC.overlayOpenModels, () => {
+    showMainWindow('providers')
+    overlay.dismiss()
+  })
 
   /**
    * Speech configuration for the settings UI: the resolved connection (the instance's models or

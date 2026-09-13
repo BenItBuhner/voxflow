@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -38,6 +39,7 @@ import app.murmur.android.cloud.SyncStatus
 import app.murmur.android.dictation.DictationController
 import app.murmur.android.dictation.DictationState
 import app.murmur.android.history.HistoryStore
+import app.murmur.android.inference.Limits
 import app.murmur.android.settings.DictationStats
 import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.ui.components.Appear
@@ -134,6 +136,10 @@ fun HomeScreen(
                         style = Murmur.type.body,
                         color = c.inkSoft
                     )
+                    planLine(inference)?.let { line ->
+                        Spacer(Modifier.height(10.dp))
+                        TextLink(line, onClick = { onOpen(Route.ACCOUNT) }, modifier = Modifier.offset(x = (-6).dp))
+                    }
                     Spacer(Modifier.height(24.dp))
                 }
             }
@@ -242,6 +248,26 @@ fun HomeScreen(
             Text("Murmur ${BuildConfig.VERSION_NAME}", style = Murmur.type.labelSmall, color = c.inkMuted)
             Spacer(Modifier.height(28.dp))
         }
+    }
+}
+
+/**
+ * Where the account stands, in one quiet line under the greeting: the trial's days, the free week's
+ * words, a paused formatting model. Null when there is nothing to say; never a banner.
+ */
+fun planLine(inference: InferenceView, now: Long = System.currentTimeMillis()): String? {
+    if (!inference.offersMurmur || !inference.signedIn || inference.status == null) return null
+    if (!inference.routing.murmurStt && inference.planState != "trial") return null
+    return when (inference.planState) {
+        "trial" -> "Pro trial · ${if (inference.trialDaysLeft == 1) "last day" else "${inference.trialDaysLeft} days left"}"
+        "free" -> inference.meters.firstOrNull { it.limit == "wordsPerWeek" }?.let { words ->
+            if (words.exceeded) "Free plan · this week's words are used up · more ${Limits.formatResetTime(words.resetsAt.toLong(), now)}"
+            else "Free plan · ${Limits.meterValue(words)} this week"
+        }
+        else -> if (inference.formattingPaused) {
+            val paused = inference.meters.firstOrNull { it.limit == "fairUseSttSecondsPerMonth" }
+            "Pro · formatting paused${paused?.let { " until ${Limits.formatResetTime(it.resetsAt.toLong(), now).removePrefix("on ")}" } ?: ""} (fair use)"
+        } else null
     }
 }
 

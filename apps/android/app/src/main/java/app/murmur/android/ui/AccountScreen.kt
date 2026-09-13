@@ -1,11 +1,20 @@
 package app.murmur.android.ui
 
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -13,12 +22,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import app.murmur.android.cloud.CloudConfig
 import app.murmur.android.cloud.CloudSync
 import app.murmur.android.cloud.SyncPhase
 import app.murmur.android.cloud.SyncStatus
+import app.murmur.android.cloud.UsageMeterDto
+import app.murmur.android.inference.Limits
+import app.murmur.android.settings.MurmurSettings
 import app.murmur.android.settings.SettingsStore
 import app.murmur.android.ui.components.ControlRow
 import app.murmur.android.ui.components.Dot
@@ -27,8 +41,11 @@ import app.murmur.android.ui.components.PrimaryButton
 import app.murmur.android.ui.components.Screen
 import app.murmur.android.ui.components.SecondaryButton
 import app.murmur.android.ui.components.SectionGap
+import app.murmur.android.ui.components.Tag
 import app.murmur.android.ui.theme.Murmur
 import app.murmur.android.ui.theme.Paper
+import app.murmur.android.ui.theme.Radii
+import app.murmur.android.ui.theme.Space
 import com.clerk.api.Clerk
 import kotlinx.coroutines.launch
 
@@ -79,6 +96,31 @@ fun AccountScreen(config: CloudConfig, store: SettingsStore, nav: TopNav, onSign
     val name = status.user?.name
         ?: listOfNotNull(user?.firstName, user?.lastName).joinToString(" ").ifBlank { "Your account" }
     val email = status.user?.email ?: user?.primaryEmailAddress?.emailAddress
+    AccountContent(
+        config = config,
+        status = status,
+        name = name,
+        email = email,
+        settings = settings,
+        nav = nav,
+        onSyncNow = { sync.syncNow() },
+        onSignOut = { scope.launch { sync.signOut() } }
+    )
+}
+
+/** The signed-in Account screen, given everything it shows. */
+@Composable
+fun AccountContent(
+    config: CloudConfig,
+    status: SyncStatus,
+    name: String,
+    email: String?,
+    settings: MurmurSettings,
+    nav: TopNav,
+    onSyncNow: () -> Unit,
+    onSignOut: () -> Unit
+) {
+    val c = Murmur.colors
     val inference = rememberInferenceView(settings)
 
     Screen(title = "Account", nav = nav) {
@@ -90,19 +132,11 @@ fun AccountScreen(config: CloudConfig, store: SettingsStore, nav: TopNav, onSign
 
         SectionGap()
 
+        PlanGroup(inference)
+
+        SectionGap()
+
         Group(rows = true) {
-            ControlRow(
-                "${inference.planLabel} plan",
-                description = when {
-                    !inference.managedAvailable -> "This Murmur instance does not provide models of its own; connect your provider under Speech model."
-                    inference.status != null ->
-                        "${Math.round(inference.status.limits.sttSecondsPerMonth / 60)} minutes of transcription a month with Murmur's models. " +
-                            if (inference.routing.murmurStt) "In use on this phone." else "This phone uses your own provider."
-                    else -> "Waiting for your account status…"
-                }
-            ) {
-                Text(inference.minutesLabel ?: inference.planLabel, style = Murmur.type.labelSmall, color = c.inkSoft)
-            }
             ControlRow("Sync", description = "Dictionary and style preferences. Your model choice and any API keys of your own stay on this phone.") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Dot(syncColor(status), size = 6.dp, pulsing = status.phase == SyncPhase.SYNCING)
@@ -121,8 +155,8 @@ fun AccountScreen(config: CloudConfig, store: SettingsStore, nav: TopNav, onSign
         Spacer(Modifier.height(28.dp))
 
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            SecondaryButton("Sync now", onClick = { sync.syncNow() })
-            SecondaryButton("Sign out", onClick = { scope.launch { sync.signOut() } })
+            SecondaryButton("Sync now", onClick = onSyncNow)
+            SecondaryButton("Sign out", onClick = onSignOut)
         }
 
         SectionGap()
@@ -130,5 +164,136 @@ fun AccountScreen(config: CloudConfig, store: SettingsStore, nav: TopNav, onSign
         Text("Instance", style = Murmur.type.overline, color = c.inkMuted)
         Spacer(Modifier.height(6.dp))
         Text(config.convexUrl, style = Murmur.type.bodySmall, color = c.inkMuted)
+    }
+}
+
+/** What the plan means for the account right now, in one sentence. */
+fun planDescription(inference: InferenceView): String {
+    if (!inference.managedAvailable) return "This Murmur instance does not provide models of its own; connect your provider under Speech model."
+    if (inference.status == null) return "Waiting for your account status…"
+    return when (inference.planState) {
+        "trial" -> "${if (inference.trialDaysLeft == 1) "1 day" else "${inference.trialDaysLeft} days"} left with everything Pro offers, no card needed. Afterwards the free plan carries on with a weekly allowance; upgrade whenever you want to keep dictating without one."
+        "pro" -> if (inference.formattingPaused)
+            "Unlimited dictation within fair use. The formatting model is paused for the rest of this month; your text is still transcribed and tidied by rules."
+        else
+            "Unlimited dictation within fair use: the meters below show how far this month has come. Invoices, the card and cancellation live on your account page."
+        else -> "A weekly allowance of free words and speech, a handful of dictations a day, clips up to a minute. Upgrade for unlimited dictation, or connect your own provider under Speech model."
+    }
+}
+
+/**
+ * The account's plan: where it stands (trial, free, Pro), how much of each allowance is used and
+ * when it comes back, and the actions on it: Upgrade (the instance's upgrade page, sent only while
+ * an upgrade applies) and Manage plan (the web account page, for Pro and the trial), both opened in
+ * the browser. An instance without a site URL sends neither link and gets neither button.
+ */
+@Composable
+fun PlanGroup(inference: InferenceView) {
+    val c = Murmur.colors
+    val context = LocalContext.current
+    val open: (String?) -> Unit = { url ->
+        if (url != null) runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+    }
+    val actions = inference.planActions
+    val paused = inference.meters.firstOrNull { it.limit == "fairUseSttSecondsPerMonth" }
+    Group(rows = true) {
+        ControlRow(inference.planTitle, description = planDescription(inference)) {
+            Tag(
+                if (inference.planState == "trial" && inference.trialDaysLeft > 0) "${inference.trialDaysLeft}d left" else inference.planLabel,
+                color = when (inference.planState) {
+                    "pro" -> c.sage
+                    "trial" -> c.emberText
+                    else -> c.inkSoft
+                }
+            )
+        }
+        if (inference.formattingPaused && paused != null) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = Space.row)
+                    .clip(RoundedCornerShape(Radii.nested(Radii.card, Space.card)))
+                    .background(c.ember.copy(alpha = if (c.isDark) 0.16f else 0.1f))
+                    .padding(horizontal = 14.dp, vertical = 12.dp)
+            ) {
+                Text(
+                    "Formatting paused until ${Limits.formatResetTime(paused.resetsAt.toLong()).removePrefix("on ")}",
+                    style = Murmur.type.title,
+                    color = c.ink
+                )
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    "Past ${Limits.formatAudioSeconds(paused.allowed)} of transcription this month, Murmur inserts your words with rule-based cleanup only (fair use). Nothing else changes.",
+                    style = Murmur.type.bodySmall,
+                    color = c.inkSoft
+                )
+            }
+        }
+        if (inference.meters.isNotEmpty()) {
+            for (meter in inference.meters) MeterRow(meter)
+            if (!inference.routing.murmurStt) {
+                Text(
+                    "This phone uses your own speech provider; only devices on Murmur's models count here.",
+                    style = Murmur.type.labelSmall,
+                    color = c.inkMuted,
+                    modifier = Modifier.padding(bottom = Space.row)
+                )
+            }
+        } else if (inference.status != null && inference.minutesLabel != null) {
+            ControlRow(
+                "Used this month",
+                description = if (inference.routing.murmurStt) "Murmur's speech model is in use on this phone." else "This phone uses your own provider; the allowance is untouched by it."
+            ) {
+                Text(inference.minutesLabel ?: "", style = Murmur.type.labelSmall, color = c.inkSoft)
+            }
+        }
+        if (actions.upgrade != null || actions.manage != null) {
+            Row(Modifier.padding(top = 4.dp, bottom = Space.row), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                actions.upgrade?.let { url -> PrimaryButton("Upgrade", onClick = { open(url) }) }
+                actions.manage?.let { url -> SecondaryButton("Manage plan", onClick = { open(url) }) }
+            }
+        }
+    }
+}
+
+/** One allowance: a track that fills as it is used, the figure, and when it resets. */
+@Composable
+private fun MeterRow(meter: UsageMeterDto) {
+    val c = Murmur.colors
+    val share = if (meter.allowed > 0) (meter.used / meter.allowed).coerceIn(0.0, 1.0).toFloat() else 0f
+    val reset = Limits.formatResetTime(meter.resetsAt.toLong())
+    Column(Modifier.fillMaxWidth().padding(vertical = Space.row)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(Limits.meterLabel(meter.limit), style = Murmur.type.title, color = c.ink, modifier = Modifier.weight(1f))
+            Text(Limits.meterValue(meter), style = Murmur.type.labelSmall, color = c.inkSoft)
+        }
+        Spacer(Modifier.height(8.dp))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(6.dp)
+                .clip(CircleShape)
+                .background(c.hairline.copy(alpha = 0.6f))
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth(maxOf(0.02f, share))
+                    .fillMaxHeight()
+                    .background(
+                        when {
+                            meter.exceeded -> c.ember
+                            share >= 0.9f -> c.clay
+                            else -> c.ink
+                        },
+                        CircleShape
+                    )
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            if (meter.exceeded) "Used up · more $reset" else "Resets ${reset.removePrefix("on ")}",
+            style = Murmur.type.labelSmall,
+            color = c.inkSoft
+        )
     }
 }

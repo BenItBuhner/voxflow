@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
+import { describeLimit, type LimitNotice } from '@shared/limits'
 import type { OverlayState } from '@shared/types'
 import { cn } from '@renderer/lib/utils'
 
@@ -9,6 +10,11 @@ const IDLE_WIDTH = 56
 const IDLE_HEIGHT = 6
 const PILL_HEIGHT = 44
 const PILL_PAD_X = 16
+/** The limit notice: two lines and a row of buttons, at the sheet radius rather than a capsule. */
+const LIMIT_HEIGHT = 112
+/** Text that went in with rule-based cleanup only: the success pill grows a second, quieter line. */
+const SOFT_HEIGHT = 64
+const LIMIT_PAD_X = 20
 /** How long an outgoing layer keeps fading; must cover `overlay-layer-out` in globals.css. */
 const LEAVE_MS = 240
 const FLAT_LEVELS: readonly number[] = Array(BAR_COUNT).fill(0.05)
@@ -20,8 +26,27 @@ interface Props {
   /** The pill's buttons, shown on an error whose recording can be sent again. */
   onRetry?: (id: string) => void
   onDismiss?: () => void
+  /** The two ways forward from a plan limit: the web account page, or the user's own provider. */
+  onUpgrade?: (url: string) => void
+  onOwnProvider?: () => void
   /** The pointer entered or left the pill (main decides whether the window takes clicks). */
   onHover?: (over: boolean) => void
+}
+
+/** A refusal on a plan limit: the pill explains it instead of showing the bare error. */
+function isLimitStop(s: OverlayState): s is OverlayState & { limit: LimitNotice } {
+  return s.phase === 'error' && !!s.limit
+}
+
+/** Text inserted with rule-based cleanup only because a plan limit paused or refused the model. */
+function isSoftLimit(s: OverlayState): s is OverlayState & { limit: LimitNotice } {
+  return s.phase === 'success' && !!s.limit
+}
+
+function contentHeight(s: OverlayState): string {
+  if (isLimitStop(s)) return 'h-[112px]'
+  if (isSoftLimit(s)) return 'h-[64px]'
+  return 'h-11'
 }
 
 /** One set of pill contents. The current layer renders live props; leaving layers are frozen. */
@@ -48,7 +73,7 @@ function contentKey(s: OverlayState): string {
     case 'listening':
       return `listening:${s.mode === 'command' ? 'command' : 'dictation'}`
     default:
-      return `${s.phase}:${s.mode ?? ''}:${s.message ?? ''}:${s.retryId ?? ''}`
+      return `${s.phase}:${s.mode ?? ''}:${s.message ?? ''}:${s.retryId ?? ''}:${s.limit?.limit ?? ''}`
   }
 }
 
@@ -60,7 +85,8 @@ function labelFor(s: OverlayState): string {
     case 'processing':
       return s.mode === 'command' ? 'Editing…' : 'Transcribing…'
     case 'success':
-      return s.message ?? 'Inserted'
+      if (s.message) return s.message
+      return s.limit ? describeLimit(s.limit, Date.now(), 'formatting').title : 'Inserted'
     case 'error':
       return s.message ?? 'Something went wrong'
     case 'disabled':
@@ -82,12 +108,15 @@ export function Overlay({
   micError,
   onRetry,
   onDismiss,
+  onUpgrade,
+  onOwnProvider,
   onHover
 }: Props): React.JSX.Element {
   const key = contentKey(state)
   const idle = state.phase === 'idle'
   const listening = state.phase === 'listening'
-  const interactive = state.phase === 'error' && !!state.retryId
+  const limitStop = isLimitStop(state)
+  const interactive = state.phase === 'error' && (!!state.retryId || limitStop)
 
   // ---- waveform: a new sample slides in on a fixed cadence, independent of the frame rate -----
   const [levels, setLevels] = useState<readonly number[]>(FLAT_LEVELS)
@@ -158,8 +187,15 @@ export function Overlay({
     return () => observer.disconnect()
   }, [key])
 
-  const width = idle ? IDLE_WIDTH : Math.max(IDLE_WIDTH, contentWidth + PILL_PAD_X * 2)
-  const height = idle ? IDLE_HEIGHT : PILL_HEIGHT
+  const padX = limitStop ? LIMIT_PAD_X : PILL_PAD_X
+  const width = idle ? IDLE_WIDTH : Math.max(IDLE_WIDTH, contentWidth + padX * 2)
+  const height = idle
+    ? IDLE_HEIGHT
+    : limitStop
+      ? LIMIT_HEIGHT
+      : isSoftLimit(state)
+        ? SOFT_HEIGHT
+        : PILL_HEIGHT
   const phase = state.phase
 
   return (
@@ -170,7 +206,9 @@ export function Overlay({
         onPointerEnter={interactive ? () => onHover?.(true) : undefined}
         onPointerLeave={interactive ? () => onHover?.(false) : undefined}
         className={cn(
-          'overlay-pill relative overflow-hidden rounded-full text-note font-medium text-overlay-foreground',
+          'overlay-pill relative overflow-hidden text-note font-medium text-overlay-foreground',
+          // Two lines of explanation sit better on the sheet radius than in a capsule.
+          limitStop ? 'rounded-2xl' : 'rounded-full',
           // The pill floats over other windows: the overlay elevation, and a thin light catch on
           // its top edge rather than an outline, so it reads as a surface with a light on it.
           idle
@@ -179,7 +217,8 @@ export function Overlay({
               : 'bg-overlay/60 shadow-[0_1px_4px_rgba(0,0,0,0.35)]'
             : 'shadow-[0_6px_24px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.08)]',
           !idle && 'bg-overlay/95',
-          phase === 'error' && 'bg-overlay-error/95',
+          // A plan limit is not a fault: it keeps the pill's own colour and speaks calmly.
+          phase === 'error' && !limitStop && 'bg-overlay-error/95',
           phase === 'success' && 'bg-overlay-success/95',
           phase === 'disabled' && 'bg-overlay-disabled/90 text-overlay-foreground/70',
           state.mode === 'command' && listening && 'bg-overlay-command/95'
@@ -195,13 +234,18 @@ export function Overlay({
           >
             <div
               ref={layer.leaving ? undefined : contentRef}
-              className="flex h-11 items-center gap-3 whitespace-nowrap"
+              className={cn(
+                'flex items-center gap-3 whitespace-nowrap',
+                contentHeight(layer.leaving ? layer.state : state)
+              )}
             >
               <Contents
                 state={layer.leaving ? layer.state : state}
                 levels={layer.leaving ? layer.levels : levels}
                 onRetry={layer.leaving ? undefined : onRetry}
                 onDismiss={layer.leaving ? undefined : onDismiss}
+                onUpgrade={layer.leaving ? undefined : onUpgrade}
+                onOwnProvider={layer.leaving ? undefined : onOwnProvider}
               />
             </div>
           </div>
@@ -215,16 +259,32 @@ function Contents({
   state,
   levels,
   onRetry,
-  onDismiss
+  onDismiss,
+  onUpgrade,
+  onOwnProvider
 }: {
   state: OverlayState
   levels: readonly number[]
   onRetry?: (id: string) => void
   onDismiss?: () => void
+  onUpgrade?: (url: string) => void
+  onOwnProvider?: () => void
 }): React.JSX.Element | null {
   const label = labelFor(state)
   const elapsed = state.elapsedSec ?? 0
   const elapsedLabel = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}`
+  if (isLimitStop(state)) {
+    return (
+      <LimitStop
+        limit={state.limit}
+        retryId={state.retryId}
+        onRetry={onRetry}
+        onDismiss={onDismiss}
+        onUpgrade={onUpgrade}
+        onOwnProvider={onOwnProvider}
+      />
+    )
+  }
   switch (state.phase) {
     case 'listening': {
       const command = state.mode === 'command'
@@ -281,13 +341,29 @@ function Contents({
           <span className="text-overlay-foreground/85">{label}</span>
         </>
       )
-    case 'success':
+    case 'success': {
+      // Text that went in with rule-based cleanup only: say so in passing, and when it comes back.
+      const soft = state.limit ? describeLimit(state.limit, Date.now(), 'formatting') : null
+      if (soft) {
+        return (
+          <>
+            <CheckIcon />
+            <div className="flex flex-col gap-0.5 leading-tight">
+              <span className="max-w-[460px] truncate">{label}</span>
+              <span className="max-w-[460px] truncate text-meta font-normal text-overlay-foreground/65">
+                {soft.detail}
+              </span>
+            </div>
+          </>
+        )
+      }
       return (
         <>
           <CheckIcon />
           <span>{label}</span>
         </>
       )
+    }
     case 'error': {
       const retryId = state.retryId
       if (!retryId) {
@@ -334,6 +410,102 @@ function Contents({
     default:
       return null
   }
+}
+
+/**
+ * A refusal on a plan limit. Not a fault, so no red: what ran out and when it comes back, then the
+ * two ways forward (the account page, or the user's own provider) beside Retry, since the
+ * recording is kept and can be sent again once the limit has reset or the route has changed.
+ */
+function LimitStop({
+  limit,
+  retryId,
+  onRetry,
+  onDismiss,
+  onUpgrade,
+  onOwnProvider
+}: {
+  limit: LimitNotice
+  retryId?: string
+  onRetry?: (id: string) => void
+  onDismiss?: () => void
+  onUpgrade?: (url: string) => void
+  onOwnProvider?: () => void
+}): React.JSX.Element {
+  const copy = describeLimit(limit, Date.now())
+  const upgrade = copy.upgradeHelps ? limit.upgradeUrl : null
+  const button =
+    'flex h-7 items-center gap-1.5 rounded-full px-3 text-meta font-semibold transition-colors'
+  const tonal = cn(
+    button,
+    'bg-overlay-foreground/15 text-overlay-foreground hover:bg-overlay-foreground/28 active:bg-overlay-foreground/35'
+  )
+  return (
+    <div className="flex w-[520px] max-w-[520px] flex-col whitespace-nowrap">
+      <div className="flex items-center gap-3">
+        <LimitIcon />
+        <span className="min-w-0 flex-1 truncate" title={limit.message}>
+          {copy.title}
+        </span>
+        <button
+          type="button"
+          aria-label="Dismiss"
+          title="Dismiss"
+          onClick={() => onDismiss?.()}
+          className="-mr-1.5 flex size-7 items-center justify-center rounded-full text-overlay-foreground/70 transition-colors hover:bg-overlay-foreground/15 hover:text-overlay-foreground"
+        >
+          <CloseIcon />
+        </button>
+      </div>
+      <span
+        className="mt-0.5 min-w-0 truncate pl-7 text-meta font-normal text-overlay-foreground/65"
+        title={copy.detail}
+      >
+        {copy.detail}
+      </span>
+      <div className="mt-3 flex items-center justify-end gap-2">
+        {upgrade && (
+          <button
+            type="button"
+            onClick={() => onUpgrade?.(upgrade)}
+            className={cn(
+              button,
+              'bg-overlay-foreground text-overlay hover:bg-overlay-foreground/90 active:bg-overlay-foreground/80'
+            )}
+          >
+            Upgrade
+          </button>
+        )}
+        <button type="button" onClick={() => onOwnProvider?.()} className={tonal}>
+          Use my own model
+        </button>
+        {retryId && (
+          <button type="button" onClick={() => onRetry?.(retryId)} className={tonal}>
+            <RetryIcon /> Retry
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function LimitIcon(): React.JSX.Element {
+  return (
+    <svg
+      className="shrink-0 text-warning"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </svg>
+  )
 }
 
 function LockIcon(): React.JSX.Element {

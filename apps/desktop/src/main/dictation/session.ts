@@ -23,10 +23,10 @@ import {
   type AppContext,
   type FormatContext,
   type FormatInput,
-  type FormatResult,
   type ResolvedStyle
 } from '@engine'
 import { MURMUR_ERROR_CODES } from '@shared/inference'
+import { isPlanLimit, type LimitNotice } from '@shared/limits'
 import { sessionDurationLimitMs, type Settings } from '@shared/settings'
 import type {
   ActiveWindowInfo,
@@ -41,7 +41,7 @@ import { createLogger } from '../logger'
 import { localDay } from '../cloud/reducers'
 import type { Recorder } from '../audio/recorder'
 import type { HookService } from '../hotkeys/hook'
-import type { InferenceRouter, ResolvedStt } from '../inference/router'
+import type { FormatOutcome, InferenceRouter, ResolvedStt } from '../inference/router'
 import type { SettingsStore } from '../store/settings'
 import type { HistoryStore } from '../store/history'
 import type { RecordingStore } from '../store/recordings'
@@ -363,9 +363,13 @@ export class DictationController extends EventEmitter {
       this.showNotice(message)
       return { ok: false, error: message, recorded: false }
     }
-    const failure = (raw: string, resolved: ResolvedStt | null, error: string): ProcessOutcome => {
+    // A refusal on a plan limit is still a failure the recording survives: the entry and the pill
+    // carry the limit so the user learns what ran out, when it comes back, and what else they can
+    // do, with Retry right there for when it has.
+    const failure = (raw: string, resolved: ResolvedStt | null, err: unknown): ProcessOutcome => {
+      const error = friendlyError(err)
       this.recordFailure(job, raw, app, timings, resolved, error)
-      this.showError(error, job.recording ? job.id : undefined)
+      this.showError(error, job.recording ? job.id : undefined, planLimitOf(err))
       return { ok: false, error, recorded: true }
     }
 
@@ -403,7 +407,7 @@ export class DictationController extends EventEmitter {
       resolved = await this.deps.inference.stt()
     } catch (err) {
       timings.sttMs = Math.round(performance.now() - t)
-      return failure('', null, friendlyError(err))
+      return failure('', null, err)
     }
     const prompt = s.stt.useDictionaryPrompt
       ? buildSttPrompt(
@@ -430,7 +434,7 @@ export class DictationController extends EventEmitter {
       )
     } catch (err) {
       timings.sttMs = Math.round(performance.now() - t)
-      return failure('', resolved, friendlyError(err))
+      return failure('', resolved, err)
     }
     timings.sttMs = Math.round(performance.now() - t)
     if (stt.resumed)
@@ -458,6 +462,8 @@ export class DictationController extends EventEmitter {
     let pressEnter = false
     let replaceSelection = false
     let selectionRestore: (() => void) | null = null
+    /** The text goes in, but the formatting model was paused or refused on a plan limit. */
+    let softLimit: LimitNotice | undefined
 
     if (job.mode === 'command') {
       // Wait for the user to physically release the chord FIRST (hook still live so the key-ups
@@ -477,7 +483,7 @@ export class DictationController extends EventEmitter {
         llm = (await this.deps.inference.llm()).cfg
       } catch (err) {
         sel.restore()
-        return failure(raw, resolved, friendlyError(err))
+        return failure(raw, resolved, err)
       }
       if (!llm.baseUrl || !llm.model) {
         sel.restore()
@@ -508,7 +514,7 @@ export class DictationController extends EventEmitter {
       } catch (err) {
         timings.llmMs = Math.round(performance.now() - t)
         sel.restore()
-        return failure(raw, resolved, friendlyError(err))
+        return failure(raw, resolved, err)
       }
     } else if (style.mode === 'off') {
       finalText = raw + (style.trailingSpace ? ' ' : '')
@@ -519,19 +525,22 @@ export class DictationController extends EventEmitter {
         mode: style.mode,
         context: this.formatContext(s, style, app)
       }
-      let formatted: FormatResult
+      let formatted: FormatOutcome
       if (style.mode !== 'smart') {
         formatted = await formatTranscript(input, null)
       } else {
         // A formatting model that cannot be reached (signed out of Murmur, no token, gateway
-        // down) is not an error for the dictation: the rule-based text goes in, and History
-        // says why.
+        // down) or refused on a plan limit is not an error for the dictation: the rule-based text
+        // goes in, and History says why. A Murmur instance past the fair-use cap answers with the
+        // rule-based text itself and says which limit paused the model.
         try {
           const formatter = await this.deps.inference.formatter()
           formatted = await formatter.format(input)
+          softLimit = formatted.limit
         } catch (err) {
           formatted = await formatTranscript(input, null)
           formatted.status = { outcome: 'failed', detail: friendlyError(err), attempts: 0 }
+          softLimit = planLimitOf(err)
         }
       }
       const finished = finish(formatted.text, {
@@ -613,7 +622,8 @@ export class DictationController extends EventEmitter {
           ? 'Transcribed — copied to clipboard'
           : injectResult.method === 'clipboard'
             ? 'Copied — press Ctrl+V'
-            : undefined
+            : undefined,
+        limit: softLimit
       })
     } else {
       this.showError(`Copied to clipboard. ${injectResult.error ?? 'Could not insert text'}`)
@@ -764,11 +774,20 @@ export class DictationController extends EventEmitter {
     this.deps.overlay.setState({ phase: 'error', message })
   }
 
-  /** `retryId`: the failed dictation's audio is stored, so the pill offers to send it again. */
-  private showError(message: string, retryId?: string): void {
+  /**
+   * `retryId`: the failed dictation's audio is stored, so the pill offers to send it again.
+   * `limit`: the plan limit that refused it, so the pill can explain and offer the ways forward.
+   */
+  private showError(message: string, retryId?: string, limit?: LimitNotice): void {
     if (this.deps.settings.get().general.sounds) this.deps.overlay.playSound('error')
-    this.deps.overlay.setState({ phase: 'error', message, retryId })
+    this.deps.overlay.setState({ phase: 'error', message, retryId, limit })
   }
+}
+
+/** The plan limit behind an error, when a Murmur instance refused (or paused) on one. */
+export function planLimitOf(err: unknown): LimitNotice | undefined {
+  if (!(err instanceof SttError) || !err.limit) return undefined
+  return isPlanLimit(err.limit.limit) ? err.limit : undefined
 }
 
 export function friendlyError(err: unknown): string {

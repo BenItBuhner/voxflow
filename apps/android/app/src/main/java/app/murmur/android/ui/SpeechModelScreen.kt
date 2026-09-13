@@ -63,7 +63,7 @@ fun SpeechModelForm(store: SettingsStore, settings: MurmurSettings, showAdvanced
         SourceChooser(
             title = "Speech model",
             selected = settings.sttSource,
-            murmurMeta = listOfNotNull("${inference.planLabel} plan", inference.minutesLabel).joinToString(" · "),
+            murmurMeta = listOfNotNull(inference.planTitle, inference.minutesLabel).joinToString(" · "),
             onSelect = { source -> store.update { s -> s.copy(sttSource = source) } }
         )
         SectionGap()

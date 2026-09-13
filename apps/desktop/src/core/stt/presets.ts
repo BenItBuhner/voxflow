@@ -45,7 +45,8 @@ export const STT_PRESETS: SttPreset[] = [
     kind: 'openai-compatible',
     baseUrl: 'https://api.groq.com/openai/v1',
     defaultModel: 'whisper-large-v3-turbo',
-    models: ['whisper-large-v3-turbo', 'whisper-large-v3', 'distil-whisper-large-v3-en'],
+    // distil-whisper-large-v3-en was retired on 2025-08-23 in favour of whisper-large-v3-turbo.
+    models: ['whisper-large-v3-turbo', 'whisper-large-v3'],
     requiresKey: true,
     supportsDiscovery: true,
     docsUrl: 'https://console.groq.com/docs/speech-to-text',
@@ -146,14 +147,17 @@ export const LLM_PRESETS: LlmPreset[] = [
     name: 'OpenAI',
     baseUrl: 'https://api.openai.com/v1',
     defaultModel: 'gpt-4o-mini',
-    models: ['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-4.1-nano']
+    // gpt-4.1-nano shuts down on 2026-10-23; OpenAI recommends gpt-5.6-luna in its place.
+    models: ['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-5.6-luna']
   },
   {
     id: 'groq',
     name: 'Groq',
     baseUrl: 'https://api.groq.com/openai/v1',
-    defaultModel: 'llama-3.1-8b-instant',
-    models: ['llama-3.1-8b-instant', 'llama-3.3-70b-versatile']
+    // llama-3.1-8b-instant and llama-3.3-70b-versatile were retired for the free and developer
+    // tiers on 2026-08-16; these are Groq's recommended replacements (shared/models.ts).
+    defaultModel: 'openai/gpt-oss-20b',
+    models: ['openai/gpt-oss-20b', 'openai/gpt-oss-120b']
   },
   {
     id: 'ollama',

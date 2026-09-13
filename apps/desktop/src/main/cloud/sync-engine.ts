@@ -2,14 +2,18 @@ import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
 import { ConvexClient } from 'convex/browser'
+import { makeFunctionReference } from 'convex/server'
 import { ConvexError } from 'convex/values'
 import type { Id } from '@backend/_generated/dataModel'
 import {
   ONBOARDING_VERSION,
+  currentUtcDay,
+  msUntilNextUtcDay,
   type CloudConfig,
   type CloudDevice,
   type CloudUser,
   type InferenceStatus,
+  type PlanState,
   type RendererAuthState,
   type SyncPhase,
   type SyncStatus
@@ -64,6 +68,16 @@ const HEARTBEAT_MS = 15 * 60_000
 const RETRY_MS = 15_000
 const HISTORY_BACKLOG = 200
 const IMPORT_CHUNK = 500
+
+/**
+ * The account's managed-model status. It takes the client's UTC calendar day so the instance can
+ * compute the rolling windows (words this week, dictations today) and their reset times; spelled
+ * out here with the contract's shape because the committed generated API predates the argument.
+ * An instance that does not know the argument yet gets the plain call (see `subscribeStatus`).
+ */
+const inferenceStatus = makeFunctionReference<'query', { day?: string }, InferenceStatus>(
+  'inference:status'
+)
 
 type Platform = 'win32' | 'darwin' | 'linux'
 
@@ -164,6 +178,12 @@ function toCloudUser(u: {
   onboardingCompletedAt?: number
   onboardingVersion?: number
 }): CloudUser {
+  // Plan states arrive from an instance that meters plans; the committed API types predate them.
+  const extra = u as { planState?: unknown; trialEndsAt?: unknown }
+  const planState =
+    extra.planState === 'trial' || extra.planState === 'free' || extra.planState === 'pro'
+      ? (extra.planState as PlanState)
+      : undefined
   return {
     id: u.id,
     clerkId: u.clerkId,
@@ -171,6 +191,8 @@ function toCloudUser(u: {
     name: u.name,
     imageUrl: u.imageUrl,
     plan: u.plan,
+    planState,
+    trialEndsAt: typeof extra.trialEndsAt === 'number' ? extra.trialEndsAt : undefined,
     onboardingCompletedAt: u.onboardingCompletedAt,
     onboardingVersion: u.onboardingVersion
   }
@@ -193,6 +215,10 @@ export class CloudSync extends EventEmitter {
   private server = emptyServer()
   private subscriptions: Array<() => void> = []
   private historySubscription: (() => void) | null = null
+  private statusSubscription: (() => void) | null = null
+  private statusDayTimer: NodeJS.Timeout | null = null
+  /** The instance rejected the `day` argument: an older backend, asked the old way from then on. */
+  private statusWithoutDay = false
   private connectionUnsub: (() => void) | null = null
   private auth: RendererAuthState = { signedIn: false }
   private authenticated = false
@@ -496,12 +522,6 @@ export class CloudSync extends EventEmitter {
         onError
       ),
       client.onUpdate(
-        api.inference.status,
-        {},
-        guard((status) => (this.server.inference = status)),
-        onError
-      ),
-      client.onUpdate(
         api.devices.list,
         {},
         guard((list) => {
@@ -519,7 +539,57 @@ export class CloudSync extends EventEmitter {
         onError
       )
     )
+    this.subscribeStatus(generation)
     this.updateHistorySubscription(generation)
+  }
+
+  /**
+   * The managed-model status for today (UTC), asked again when the day changes so the rolling
+   * windows and their reset times stay right. An instance that does not accept the `day` argument
+   * yet answers with an argument error; then the status is asked the old way, without windows.
+   */
+  private subscribeStatus(generation: number): void {
+    const client = this.client
+    if (!client) return
+    this.stopStatusSubscription()
+    const args = this.statusWithoutDay ? {} : { day: currentUtcDay() }
+    this.statusSubscription = client.onUpdate(
+      inferenceStatus,
+      args,
+      (status) => {
+        if (generation !== this.generation) return
+        this.server.inference = status
+        this.lastSyncedAt = Date.now()
+        this.emitStatus()
+      },
+      (err) => {
+        if (generation !== this.generation) return
+        if (!this.statusWithoutDay && /ArgumentValidationError/i.test(errorMessage(err))) {
+          log.info('instance does not take a day for inference.status; asking without it')
+          this.statusWithoutDay = true
+          this.subscribeStatus(generation)
+          return
+        }
+        this.error = errorMessage(err)
+        log.warn(`inference status error: ${this.error}`)
+        this.emitStatus()
+      }
+    )
+    if (!this.statusWithoutDay) {
+      this.statusDayTimer = setTimeout(() => {
+        this.statusDayTimer = null
+        if (generation === this.generation && this.authenticated) this.subscribeStatus(generation)
+      }, msUntilNextUtcDay())
+    }
+  }
+
+  private stopStatusSubscription(): void {
+    if (this.statusDayTimer) clearTimeout(this.statusDayTimer)
+    this.statusDayTimer = null
+    if (this.statusSubscription) {
+      this.statusSubscription()
+      this.statusSubscription = null
+    }
   }
 
   private updateHistorySubscription(generation = this.generation): void {
@@ -556,6 +626,7 @@ export class CloudSync extends EventEmitter {
 
   private stopSubscriptions(): void {
     for (const unsub of this.subscriptions.splice(0)) unsub()
+    this.stopStatusSubscription()
     if (this.historySubscription) {
       this.historySubscription()
       this.historySubscription = null

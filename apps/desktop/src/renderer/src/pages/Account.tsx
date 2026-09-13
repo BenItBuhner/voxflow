@@ -15,10 +15,17 @@ import {
   Zap
 } from 'lucide-react'
 import { toast } from 'sonner'
-import type { CloudDevice } from '@shared/cloud'
+import type { CloudDevice, UsageMeter } from '@shared/cloud'
+import {
+  formatResetTime,
+  meterLabel,
+  meterValue,
+  planActions,
+  planStateLabel
+} from '@shared/limits'
 import { Button } from '@renderer/components/ui/button'
 import { Switch } from '@renderer/components/ui/switch'
-import { Badge } from '@renderer/components/ui/misc'
+import { Badge, Banner } from '@renderer/components/ui/misc'
 import {
   Dialog,
   DialogContent,
@@ -30,9 +37,14 @@ import {
 import { PageHeader, Section, SettingRow } from '@renderer/components/SettingRow'
 import { SyncBadge, syncLabel } from '@renderer/components/SyncBadge'
 import { useCloud } from '@renderer/hooks/useCloud'
-import { minutesLabel, planLabel, useInference } from '@renderer/hooks/useInference'
+import {
+  minutesLabel,
+  planTitle,
+  useInference,
+  type InferenceView
+} from '@renderer/hooks/useInference'
 import { useSettings } from '@renderer/hooks/useSettings'
-import { formatNumber, formatRelative } from '@renderer/lib/utils'
+import { cn, formatNumber, formatRelative } from '@renderer/lib/utils'
 
 export function AccountPage(): React.JSX.Element {
   const { clerk } = useCloud()
@@ -165,37 +177,7 @@ function SignedInAccount({
         </Button>
       </div>
 
-      <Section
-        title="Plan"
-        description={
-          inference.managedAvailable
-            ? 'The speech and formatting models that come with your account. Choose your own provider instead under Models and Style; keys for those stay on this device.'
-            : 'This Murmur instance does not provide models of its own; connect your provider under Models.'
-        }
-      >
-        <SettingRow
-          title={`${planLabel(inference.plan)} plan`}
-          description={
-            inference.status
-              ? `${Math.round(inference.status.limits.sttSecondsPerMonth / 60)} minutes of transcription and ${formatNumber(inference.status.limits.llmTokensPerMonth)} formatting tokens a month, up to ${inference.status.limits.requestsPerMinute} requests a minute.`
-              : 'Waiting for your account status…'
-          }
-        >
-          <Badge variant={inference.plan === 'pro' ? 'success' : 'secondary'}>
-            {planLabel(inference.plan)}
-          </Badge>
-        </SettingRow>
-        {inference.status && inference.minutes && (
-          <SettingRow
-            title="Used this month"
-            description={`${inference.routing.stt === 'murmur' ? 'Murmur’s speech model is in use on this device.' : 'This device uses your own speech provider; the allowance is untouched by it.'}`}
-          >
-            <span className="text-note tabular-nums text-muted-foreground">
-              {minutesLabel(inference.minutes)} · {formatNumber(inference.tokensUsed)} tokens
-            </span>
-          </SettingRow>
-        )}
-      </Section>
+      <PlanSection inference={inference} />
 
       <Section
         title="Sync"
@@ -339,6 +321,137 @@ function SignedInAccount({
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+/** What the plan means for the account right now, in one sentence. */
+function planDescription(inference: InferenceView): string {
+  if (!inference.managedAvailable)
+    return 'This Murmur instance does not provide models of its own; connect your provider under Models.'
+  if (!inference.status) return 'Waiting for your account status…'
+  switch (inference.planState) {
+    case 'trial':
+      return `${inference.trialDaysLeft === 1 ? '1 day' : `${inference.trialDaysLeft} days`} left with everything Pro offers, no card needed. Afterwards the free plan carries on with a weekly allowance; upgrade whenever you want to keep dictating without one.`
+    case 'pro':
+      return inference.formattingPaused
+        ? 'Unlimited dictation within fair use. The formatting model is paused for the rest of this month; your text is still transcribed and tidied by rules.'
+        : 'Unlimited dictation within fair use: the meters below show how far this month has come. Invoices, the card and cancellation live on your account page.'
+    default:
+      return 'A weekly allowance of free words and speech, a handful of dictations a day, clips up to a minute. Upgrade for unlimited dictation, or connect your own provider under Models.'
+  }
+}
+
+/**
+ * The account's plan: where it stands (trial, free, Pro), how much of each allowance is used and
+ * when it comes back, and the actions on it: Upgrade (the instance's upgrade page, sent only while
+ * an upgrade applies) and Manage plan (the web account page, for Pro and the trial). An instance
+ * without a site URL sends neither link and gets neither button.
+ */
+function PlanSection({ inference }: { inference: InferenceView }): React.JSX.Element {
+  const open = (url: string | null): void => {
+    if (url) void window.murmur.app.openExternal(url)
+  }
+  const { upgrade, manage } = planActions(inference)
+  const paused = inference.meters.find((m) => m.limit === 'fairUseSttSecondsPerMonth')
+  return (
+    <Section
+      title="Plan"
+      description={
+        inference.managedAvailable
+          ? 'The speech and formatting models that come with your account. Choose your own provider instead under Models and Style; keys for those stay on this device.'
+          : undefined
+      }
+    >
+      <SettingRow title={planTitle(inference.planState)} description={planDescription(inference)}>
+        <Badge
+          variant={
+            inference.planState === 'pro'
+              ? 'success'
+              : inference.planState === 'trial'
+                ? 'default'
+                : 'secondary'
+          }
+        >
+          {inference.planState === 'trial' && inference.trialDaysLeft > 0
+            ? `${inference.trialDaysLeft}d left`
+            : planStateLabel(inference.planState)}
+        </Badge>
+        {upgrade && (
+          <Button size="sm" onClick={() => open(upgrade)}>
+            <Sparkles /> Upgrade
+          </Button>
+        )}
+        {manage && (
+          <Button variant="outline" size="sm" onClick={() => open(manage)}>
+            <Settings2 /> Manage plan
+          </Button>
+        )}
+      </SettingRow>
+      {inference.formattingPaused && paused && (
+        <Banner tone="warning" className="my-2">
+          <div className="text-sm font-medium">
+            Formatting paused until {formatResetTime(paused.resetsAt).replace(/^on /, '')}
+          </div>
+          <div className="text-note text-muted-foreground">
+            Past {meterValue(paused).split(' of ')[1]} of transcription this month, Murmur inserts
+            your words with rule-based cleanup only (fair use). Nothing else changes.
+          </div>
+        </Banner>
+      )}
+      {inference.meters.length > 0
+        ? inference.meters.map((m) => <MeterRow key={m.limit} meter={m} />)
+        : inference.status &&
+          inference.minutes && (
+            <SettingRow
+              title="Used this month"
+              description={
+                inference.routing.stt === 'murmur'
+                  ? 'Murmur’s speech model is in use on this device.'
+                  : 'This device uses your own speech provider; the allowance is untouched by it.'
+              }
+            >
+              <span className="text-note tabular-nums text-muted-foreground">
+                {minutesLabel(inference.minutes)} · {formatNumber(inference.tokensUsed)} tokens
+              </span>
+            </SettingRow>
+          )}
+      {inference.meters.length > 0 && inference.routing.stt !== 'murmur' && (
+        <p className="pt-2 text-meta text-muted-foreground">
+          This device uses your own speech provider; only devices on Murmur’s models count here.
+        </p>
+      )}
+    </Section>
+  )
+}
+
+/** One allowance: a track that fills as it is used, the figure, and when it resets. */
+function MeterRow({ meter }: { meter: UsageMeter }): React.JSX.Element {
+  const share = meter.allowed > 0 ? Math.min(1, meter.used / meter.allowed) : 0
+  const reset = formatResetTime(meter.resetsAt)
+  return (
+    <SettingRow
+      title={meterLabel(meter.limit)}
+      description={
+        meter.exceeded
+          ? `Used up · more ${reset}`
+          : `Resets ${reset.startsWith('on ') ? reset.slice(3) : reset}`
+      }
+    >
+      <div className="flex w-56 items-center gap-3">
+        <div className="well h-1.5 flex-1 overflow-hidden rounded-full">
+          <div
+            className={cn(
+              'h-full rounded-full transition-[width] duration-500',
+              meter.exceeded ? 'bg-warning' : share >= 0.9 ? 'bg-record' : 'bg-primary'
+            )}
+            style={{ width: `${Math.max(2, share * 100)}%` }}
+          />
+        </div>
+        <span className="w-32 text-right text-meta tabular-nums text-muted-foreground">
+          {meterValue(meter)}
+        </span>
+      </div>
+    </SettingRow>
   )
 }
 

@@ -32,6 +32,9 @@ const api = {
   /** The pill's Retry button: send the failed dictation's audio again. */
   retry: (id: string): void => ipcRenderer.send(IPC.overlayRetry, id),
   dismiss: (): void => ipcRenderer.send(IPC.overlayDismiss),
+  /** The limit pill's two ways forward: the web account page, or the user's own provider. */
+  openUrl: (url: string): void => ipcRenderer.send(IPC.overlayOpenUrl, url),
+  openModels: (): void => ipcRenderer.send(IPC.overlayOpenModels),
   /** Pointer over the pill: main lets the window take clicks only while this is true. */
   hover: (over: boolean): void => ipcRenderer.send(IPC.overlayHover, over)
 }

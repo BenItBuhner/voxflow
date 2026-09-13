@@ -13,6 +13,51 @@ export type AccountMode = 'off' | 'optional' | 'required'
 
 export type Plan = 'free' | 'pro'
 
+/**
+ * Where the account stands: the 14-day Pro trial every account starts with, the residual free tier
+ * after it, or a paid (or operator-granted) Pro subscription. `plan` is the tier whose limits apply,
+ * so a trial account is `pro` on `plan`. See internal/entitlements-contract.md in the Project store.
+ */
+export type PlanState = 'trial' | 'free' | 'pro'
+
+/** The limits the gateway meters; the `limit` field of a usage meter and of a limit error. */
+export type LimitName =
+  | 'wordsPerWeek'
+  | 'sttSecondsPerWeek'
+  | 'dictationsPerDay'
+  | 'maxClipSeconds'
+  | 'sttSecondsPerMonth'
+  | 'fairUseSttSecondsPerMonth'
+  | 'llmTokensPerMonth'
+  | 'requestsPerMinute'
+
+/** One limit that applies to the account's tier, with how much of it is used. */
+export interface UsageMeter {
+  limit: LimitName
+  used: number
+  allowed: number
+  exceeded: boolean
+  /** Epoch ms: when `used` next drops; if exceeded, when it drops under `allowed`. */
+  resetsAt: number
+}
+
+/** The rolling windows the gateway computed for the UTC day the client passed. */
+export interface UsageWindow {
+  day: string
+  /** `day` minus six days: the first day of the rolling week. */
+  weekStart: string
+  words: number
+  sttSeconds: number
+  dictationsToday: number
+}
+
+/** Next resets (epoch ms): UTC midnight, the oldest counted day leaving the week, the first of next month. */
+export interface UsageResets {
+  day: number
+  week: number | null
+  month: number
+}
+
 export interface CloudConfig {
   accountMode: AccountMode
   convexUrl: string
@@ -47,11 +92,19 @@ export interface CloudUser {
   imageUrl?: string
   /** Account tier; decides the managed-inference allowance. */
   plan: Plan
+  /** Absent from an instance that predates plan states; then `plan` alone tells the story. */
+  planState?: PlanState
+  /** Epoch ms; present once the account has been granted its trial. */
+  trialEndsAt?: number
   onboardingCompletedAt?: number
   onboardingVersion?: number
 }
 
-/** What the instance offers the signed-in account in managed models, and how much is left. */
+/**
+ * What the instance offers the signed-in account in managed models, and how much is left. The
+ * fields after `usage` arrive from an instance that meters plans; an older instance leaves them
+ * out, and `planState` then follows `plan`.
+ */
 export interface InferenceStatus {
   /** The instance is configured with at least a managed speech model. */
   available: boolean
@@ -71,6 +124,19 @@ export interface InferenceStatus {
     llmTokens: number
     llmRequests: number
   }
+  planState?: PlanState
+  trialEndsAt?: number | null
+  /** Pro past the soft fair-use cap: `/v1/format` answers with rule-based text until the month resets. */
+  formattingPaused?: boolean
+  /** The web account page that starts an upgrade; null when the instance has no site URL. */
+  upgradeUrl?: string | null
+  /** The web account page itself (plan, invoices, cancellation); null when the instance has no site URL. */
+  accountUrl?: string | null
+  /** Null when the status was fetched without the client's UTC day. */
+  window?: UsageWindow | null
+  /** Empty when the status was fetched without the client's UTC day. */
+  meters?: UsageMeter[]
+  resets?: UsageResets | null
 }
 
 export interface CloudDevice {
@@ -114,6 +180,18 @@ export interface SyncStatus {
 export function currentUsagePeriod(now = Date.now()): string {
   const d = new Date(now)
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
+}
+
+/** Current UTC calendar day as `YYYY-MM-DD`, the `day` the status query computes its windows for. */
+export function currentUtcDay(now = Date.now()): string {
+  return new Date(now).toISOString().slice(0, 10)
+}
+
+/** Milliseconds from `now` to the next UTC midnight, when the status query has to be asked again. */
+export function msUntilNextUtcDay(now = Date.now()): number {
+  const d = new Date(now)
+  const next = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1)
+  return Math.max(1, next - now)
 }
 
 export interface TokenRequest {

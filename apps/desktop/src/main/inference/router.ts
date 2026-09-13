@@ -9,6 +9,7 @@ import {
   type LlmConfig
 } from '@core/llm/client'
 import type { CloudConfig } from '@shared/cloud'
+import { parseLimitNotice, type LimitNotice } from '@shared/limits'
 import {
   MURMUR_LLM_MODEL,
   MURMUR_PROVIDER,
@@ -63,9 +64,17 @@ export interface ResolvedLlm {
  * In local builds there is no instance: everything resolves to the user's own provider and no
  * Murmur endpoint is ever contacted.
  */
+/**
+ * The engine's result, plus the plan limit a Murmur instance applied when it answered with
+ * rule-based text instead of asking the model (a Pro account past its fair-use cap).
+ */
+export interface FormatOutcome extends FormatResult {
+  limit?: LimitNotice
+}
+
 export interface Formatter {
   source: InferenceSource
-  format: (input: FormatInput) => Promise<FormatResult>
+  format: (input: FormatInput) => Promise<FormatOutcome>
 }
 
 export class InferenceRouter {
@@ -213,8 +222,8 @@ export class InferenceRouter {
     }
   }
 
-  private async remoteFormat(cfg: LlmConfig, input: FormatInput): Promise<FormatResult> {
-    const call = async (apiKey: string): Promise<FormatResult> => {
+  private async remoteFormat(cfg: LlmConfig, input: FormatInput): Promise<FormatOutcome> {
+    const call = async (apiKey: string): Promise<FormatOutcome> => {
       let res: Response
       try {
         res = await fetch(`${cfg.baseUrl}/format`, {
@@ -228,7 +237,9 @@ export class InferenceRouter {
         throw toSttError(err, 'Formatting request failed')
       }
       if (!res.ok) throw errorFromResponse(res.status, await res.text())
-      return (await res.json()) as FormatResult
+      const json = (await res.json()) as FormatResult & { limit?: unknown }
+      const limit = parseLimitNotice(json.limit, json.status?.detail)
+      return { ...json, limit: limit ?? undefined }
     }
     try {
       return await call(cfg.apiKey)

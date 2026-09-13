@@ -44,7 +44,7 @@ const own = (): Settings =>
       model: 'whisper-large-v3-turbo',
       fallbackModel: 'whisper-large-v3'
     },
-    formatting: { llm: { source: 'custom', sameAsStt: true, model: 'llama-3.1-8b-instant' } }
+    formatting: { llm: { source: 'custom', sameAsStt: true, model: 'openai/gpt-oss-20b' } }
   })
 
 describe('resolveInferenceSources', () => {
@@ -192,7 +192,7 @@ describe('InferenceRouter', () => {
     expect(llm.cfg).toMatchObject({
       baseUrl: 'https://api.groq.com/openai/v1',
       apiKey: 'sk-own-stt',
-      model: 'llama-3.1-8b-instant'
+      model: 'openai/gpt-oss-20b'
     })
     // Default settings in a local build: still the user's (unset) provider, never a token request.
     const blank = harness(LOCAL, parseSettings({}), { token: () => 'nope' })
@@ -369,7 +369,7 @@ describe('InferenceRouter', () => {
     expect(result.status.outcome).toBe('used')
     expect(seen).toHaveLength(1)
     expect(seen[0].url).toBe('https://api.groq.com/openai/v1/chat/completions')
-    expect(seen[0].body.model).toBe('llama-3.1-8b-instant')
+    expect(seen[0].body.model).toBe('openai/gpt-oss-20b')
     expect(seen[0].body.messages.at(-1)?.content).toContain(
       'Transcript:\nthe code is zero zero zero seven'
     )

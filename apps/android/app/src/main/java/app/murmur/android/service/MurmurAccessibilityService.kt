@@ -4,7 +4,9 @@ import android.accessibilityservice.AccessibilityService
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.content.res.Configuration
+import android.net.Uri
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.os.Build
@@ -18,6 +20,7 @@ import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import app.murmur.android.MainActivity
 import app.murmur.android.dictation.DictationController
 import app.murmur.android.dictation.DictationState
 import app.murmur.android.dictation.TextSink
@@ -27,6 +30,7 @@ import app.murmur.android.overlay.OverlayLayout
 import app.murmur.android.overlay.OverlayPillView
 import app.murmur.android.overlay.PillTheme
 import app.murmur.android.settings.SettingsStore
+import app.murmur.android.ui.Route
 import app.murmur.android.update.UpdateManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -217,6 +221,9 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
             // The field the dictation was meant for is still focused: send the audio again into it.
             onRetryTap = { id -> DictationController.retry(this@MurmurAccessibilityService, id, insert = true) }
             onDismissTap = { DictationController.dismiss() }
+            // The limit notice's ways forward: the web account page, or the Speech model screen.
+            onUpgradeTap = { url -> openUrl(url); DictationController.dismiss() }
+            onOwnModelTap = { openApp(Route.MODEL); DictationController.dismiss() }
             onLayoutChanged = { layout -> settings.update { it.copy(overlayLayout = layout) } }
             onEditDone = { OverlayEditor.stop() }
             onEditReset = { settings.update { it.copy(overlayLayout = OverlayLayout.DEFAULT) } }
@@ -371,6 +378,25 @@ class MurmurAccessibilityService : AccessibilityService(), TextSink, OverlayPill
     private fun copyToClipboard(text: String) {
         val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
         cm.setPrimaryClip(ClipData.newPlainText("Murmur dictation", text))
+    }
+
+    /** The web account page, in the browser. Only https links, and only from the pill's own state. */
+    private fun openUrl(url: String) {
+        if (!url.startsWith("https://")) return
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: Exception) {
+            Log.w(TAG, "could not open $url", e)
+        }
+    }
+
+    /** Bring Murmur to the front on [route]. */
+    private fun openApp(route: Route) {
+        try {
+            startActivity(MainActivity.intentFor(this, route).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: Exception) {
+            Log.w(TAG, "could not open Murmur", e)
+        }
     }
 
     companion object {

@@ -63,6 +63,8 @@ function App(): React.JSX.Element {
       micError={micError}
       onRetry={(id) => bridge.retry(id)}
       onDismiss={() => bridge.dismiss()}
+      onUpgrade={(url) => bridge.openUrl(url)}
+      onOwnProvider={() => bridge.openModels()}
       onHover={(over) => bridge.hover(over)}
     />
   )

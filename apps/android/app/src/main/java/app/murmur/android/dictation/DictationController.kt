@@ -17,6 +17,7 @@ import app.murmur.android.history.RecordingStore
 import app.murmur.android.history.StageTimings
 import app.murmur.android.inference.Inference
 import app.murmur.android.inference.InferenceRouter
+import app.murmur.android.inference.LimitNotice
 import app.murmur.android.service.RecordingService
 import app.murmur.android.settings.DictationStats
 import app.murmur.android.settings.FormattingMode
@@ -57,18 +58,28 @@ private const val TAG = "MurmurDictation"
 
 /** How long an error that can be retried stays on the pill, waiting for the user. */
 private const val RETRY_HOLD_MS = 15_000L
+/** A limit refusal is read, not glanced at; a text inserted unformatted deserves a beat more too. */
+private const val LIMIT_HOLD_MS = 20_000L
+private const val SOFT_LIMIT_HOLD_MS = 5_000L
 
 sealed class DictationState {
     data object Idle : DictationState()
     data class Listening(val elapsedSec: Int, val level: Float) : DictationState()
     data class Processing(val label: String) : DictationState()
-    data class Success(val message: String) : DictationState()
+
+    /**
+     * [limit]: the text went in with rule-based cleanup only because the Murmur instance paused or
+     * refused the formatting model on a plan limit; the pill says so in passing.
+     */
+    data class Success(val message: String, val limit: LimitNotice? = null) : DictationState()
 
     /**
      * [retryId]: the history entry whose stored recording can be sent again. The pill then shows a
      * Retry button and stays up until the user acts on it (or gives up on them after a while).
+     * [limit]: the plan limit that refused the request; the pill explains it and offers Upgrade and
+     * the user's own provider as the ways forward, beside Retry.
      */
-    data class Error(val message: String, val retryId: String? = null) : DictationState()
+    data class Error(val message: String, val retryId: String? = null, val limit: LimitNotice? = null) : DictationState()
 }
 
 /** One run of the pipeline: a dictation that was just spoken, or a stored one sent again. */
@@ -234,7 +245,7 @@ object DictationController {
                 val message = friendlyError(e)
                 val failed = run ?: Run(id, recordMs = (stoppedAt - startedAt).coerceAtLeast(0), recording = null)
                 recordFailure(appContext, settings, failed, raw = "", error = message)
-                showError(message, failed)
+                showError(message, failed, planLimitOf(e))
             } finally {
                 run?.let { releaseRecording(appContext, it) }
             }
@@ -280,7 +291,7 @@ object DictationController {
                 Log.e(TAG, "retry failed", e)
                 val message = friendlyError(e)
                 recordFailure(appContext, settings, run, raw = "", error = message)
-                showError(message, run)
+                showError(message, run, planLimitOf(e))
             } finally {
                 releaseRecording(appContext, run)
             }
@@ -358,6 +369,8 @@ object DictationController {
         var llm = LlmOutcome.SKIPPED
         var llmDetail: String? = null
         var llmMs = 0L
+        // The text goes in, but the formatting model was paused or refused on a plan limit.
+        var softLimit: LimitNotice? = null
         if (style.mode == FormattingMode.OFF) {
             final = raw + if (style.trailingSpace) " " else ""
             llmDetail = "formatting off"
@@ -383,11 +396,14 @@ object DictationController {
             } else {
                 _state.value = DictationState.Processing("Formatting…")
                 // A formatting model that cannot be reached (signed out of Murmur, no token, gateway
-                // down) is not an error for the dictation: the rule-based text goes in and History says why.
+                // down) or refused on a plan limit is not an error for the dictation: the rule-based
+                // text goes in and History says why. A Murmur instance past the fair-use cap answers
+                // with the rule-based text itself and says which limit paused the model.
                 formatted = try {
-                    router.formatter().format(input)
+                    router.formatter().format(input).also { softLimit = it.limit }
                 } catch (e: Exception) {
                     Log.w(TAG, "formatting unavailable, using rule-based text: ${e.message}")
+                    softLimit = planLimitOf(e)
                     Engine.formatTranscript(input, null)
                         .copy(status = FormatStatus(FormatOutcome.FAILED, friendlyError(e), 0))
                 }
@@ -458,7 +474,10 @@ object DictationController {
         if (run.previous != null) history.replace(entry) else history.add(entry)
         if (error == null) {
             Log.i(TAG, "${if (run.insert) "inserted" else "copied"} $wordCount words in ${entry.timings.totalMs}ms${if (run.attempts > 1) " (attempt ${run.attempts})" else ""}")
-            showTransient(DictationState.Success(if (run.insert) "Inserted" else "Copied"), 1500)
+            showTransient(
+                DictationState.Success(if (run.insert) "Inserted" else "Copied", softLimit),
+                if (softLimit != null) SOFT_LIMIT_HOLD_MS else 1500
+            )
             SettingsStore.get(context).update { current ->
                 current.copy(stats = current.stats.record(entry.wordCount, entry.speechMs, DictationStats.localDay(now)))
             }
@@ -555,12 +574,21 @@ object DictationController {
 
     /**
      * A failure the user can do something about: when the audio was stored the pill offers to send
-     * it again and waits much longer for the answer than a plain message would.
+     * it again and waits much longer for the answer than a plain message would. A plan limit is
+     * explained on the pill, with the ways forward, and waits longer still.
      */
-    private fun showError(message: String, run: Run) {
+    private fun showError(message: String, run: Run, limit: LimitNotice? = null) {
         val retryId = run.id.takeIf { run.recording != null }
-        showTransient(DictationState.Error(message, retryId), if (retryId != null) RETRY_HOLD_MS else 2500)
+        val hold = when {
+            limit != null -> LIMIT_HOLD_MS
+            retryId != null -> RETRY_HOLD_MS
+            else -> 2500L
+        }
+        showTransient(DictationState.Error(message, retryId, limit), hold)
     }
+
+    /** The plan limit behind an error, when a Murmur instance refused (or paused) on one. */
+    fun planLimitOf(err: Throwable): LimitNotice? = (err as? SttException)?.planLimit
 
     private fun loadFixture(context: Context): ShortArray {
         val bytes = context.assets.open("fixtures/jfk.wav").use { it.readBytes() }

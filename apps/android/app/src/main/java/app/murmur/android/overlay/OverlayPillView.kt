@@ -16,6 +16,9 @@ import android.view.WindowInsets
 import android.view.animation.AnimationUtils
 import androidx.core.graphics.ColorUtils
 import app.murmur.android.dictation.DictationState
+import app.murmur.android.inference.LimitNotice
+import app.murmur.android.inference.LimitStage
+import app.murmur.android.inference.Limits
 import app.murmur.android.settings.OverlayShape
 import kotlin.math.PI
 import kotlin.math.abs
@@ -47,6 +50,17 @@ private const val MESSAGE_MAX_W_DP = 300f
 
 /** An error with a Retry button and a dismiss cross needs the room; the message gives way first. */
 private const val RETRY_MAX_W_DP = 344f
+
+/**
+ * A refusal on a plan limit: two lines (what ran out, when it comes back) and its chips (Upgrade,
+ * the user's own model, Retry). Sits on the sheet radius rather than a capsule.
+ */
+private const val LIMIT_MAX_W_DP = 380f
+private const val LIMIT_H_DP = 104f
+private const val LIMIT_RADIUS_DP = 24f
+
+/** Text that went in with rule-based cleanup only: the success pill grows a second, quieter line. */
+private const val SOFT_LIMIT_H_DP = 64f
 
 /** How far outside the pill a touch still counts; the touch window is padded by this. */
 private const val TOUCH_PAD_DP = 6f
@@ -109,13 +123,16 @@ class OverlayPillView(context: Context) : View(context) {
     /** The Retry button on an error whose recording was kept; the argument is the history entry. */
     var onRetryTap: ((String) -> Unit)? = null
     var onDismissTap: (() -> Unit)? = null
+    /** The limit notice's two ways forward: the web account page (the argument is its URL), or the user's own model. */
+    var onUpgradeTap: ((String) -> Unit)? = null
+    var onOwnModelTap: (() -> Unit)? = null
     var onEditDone: (() -> Unit)? = null
     var onEditReset: (() -> Unit)? = null
 
     /** The spots changed: one was moved, added, removed or re-arranged, or the button landed on another one. */
     var onLayoutChanged: ((OverlayLayout) -> Unit)? = null
 
-    private enum class Kind { IDLE, LISTENING, PROCESSING, SUCCESS, ERROR }
+    private enum class Kind { IDLE, LISTENING, PROCESSING, SUCCESS, ERROR, LIMIT }
 
     /** [restingW] is the width the contents were laid out for; [w] may be a mid-morph snapshot. */
     private data class Look(
@@ -126,9 +143,12 @@ class OverlayPillView(context: Context) : View(context) {
         val text: String = "",
         val restingW: Float = w,
         /** Error only: the entry whose recording can be sent again (draws Retry and a dismiss cross). */
-        val retryId: String? = null
+        val retryId: String? = null,
+        /** Limit only: what refused the dictation, explained on the pill with its ways forward. */
+        val limit: LimitNotice? = null
     ) {
-        fun sameContent(other: Look): Boolean = kind == other.kind && text == other.text && retryId == other.retryId
+        fun sameContent(other: Look): Boolean =
+            kind == other.kind && text == other.text && retryId == other.retryId && limit == other.limit
     }
 
     /** Tappable pieces of the edit-mode panel. */
@@ -287,6 +307,8 @@ class OverlayPillView(context: Context) : View(context) {
     private var confirmBox = Box.EMPTY
     private var retryBox = Box.EMPTY
     private var dismissBox = Box.EMPTY
+    private var upgradeBox = Box.EMPTY
+    private var ownModelBox = Box.EMPTY
 
     // ---- public API -----------------------------------------------------------------------------
 
@@ -369,9 +391,25 @@ class OverlayPillView(context: Context) : View(context) {
         is DictationState.Idle -> idleLook()
         is DictationState.Listening -> listeningLook()
         is DictationState.Processing -> Look(Kind.PROCESSING, textPaint.measureText(s.label) + dp(64f), dp(TALL_DP), palette.background, s.label)
-        is DictationState.Success -> Look(Kind.SUCCESS, textPaint.measureText(s.message) + dp(56f), dp(TALL_DP), palette.successBackground, s.message)
+        is DictationState.Success -> {
+            val limit = s.limit
+            if (limit == null) {
+                Look(Kind.SUCCESS, textPaint.measureText(s.message) + dp(56f), dp(TALL_DP), palette.successBackground, s.message)
+            } else {
+                // Text that went in with rule-based cleanup only: the pill says so, and why, on a second line.
+                val copy = Limits.describe(limit, stage = LimitStage.FORMATTING)
+                val maxW = if (screenW > 0f) min(dp(LIMIT_MAX_W_DP), screenW - 2 * dp(OverlayGeometry.EDGE_MARGIN_DP)) else dp(LIMIT_MAX_W_DP)
+                val natural = max(textPaint.measureText(copy.title), tinyTextPaint.measureText(copy.detail)) + dp(56f)
+                Look(Kind.SUCCESS, min(maxW, natural), dp(SOFT_LIMIT_H_DP), palette.successBackground, copy.title, limit = limit)
+            }
+        }
         is DictationState.Error -> {
-            if (s.retryId == null) {
+            val limit = s.limit?.takeIf { it.isPlanLimit }
+            if (limit != null) {
+                // Not a fault: the pill keeps its own colour and explains, with the ways forward.
+                val maxW = if (screenW > 0f) min(dp(LIMIT_MAX_W_DP), screenW - 2 * dp(OverlayGeometry.EDGE_MARGIN_DP)) else dp(LIMIT_MAX_W_DP)
+                Look(Kind.LIMIT, maxW, dp(LIMIT_H_DP), palette.background, s.message, retryId = s.retryId, limit = limit)
+            } else if (s.retryId == null) {
                 Look(Kind.ERROR, min(dp(MESSAGE_MAX_W_DP), textPaint.measureText(s.message) + dp(56f)), dp(TALL_DP), palette.errorBackground, s.message)
             } else {
                 // Icon, message, the Retry chip and the dismiss cross; the message is what gives way.
@@ -614,7 +652,7 @@ class OverlayPillView(context: Context) : View(context) {
             drawFlickTargets(canvas, now)
         }
 
-        val radius = drawn.height / 2f
+        val radius = lerp(radiusOf(fromLook, drawn.height), radiusOf(toLook, drawn.height), e)
         pillPaint.color = curBg
         pillPaint.setShadowLayer(dp(if (dragging) 12f else 6f), 0f, dp(if (dragging) 5f else 2f), 0x59000000)
         scratchRect.set(drawn.left, drawn.top, drawn.right, drawn.bottom)
@@ -650,6 +688,10 @@ class OverlayPillView(context: Context) : View(context) {
         if (isAnimating(now)) postInvalidateOnAnimation()
     }
 
+    /** A capsule, except for the limit notice, which sits on the sheet radius. */
+    private fun radiusOf(look: Look, h: Float): Float =
+        if (look.kind == Kind.LIMIT) min(dp(LIMIT_RADIUS_DP), h / 2f) else h / 2f
+
     private fun drawLayer(canvas: Canvas, box: Box, look: Look, alpha: Float, scale: Float, now: Long, dt: Long) {
         val full = alpha >= 0.999f && abs(scale - 1f) < 0.001f
         canvas.save()
@@ -664,6 +706,7 @@ class OverlayPillView(context: Context) : View(context) {
             Kind.PROCESSING -> drawProcessing(canvas, box, look.text, now)
             Kind.SUCCESS -> drawMessage(canvas, box, look, palette.successForeground, true, now)
             Kind.ERROR -> drawMessage(canvas, box, look, palette.errorForeground, false, now)
+            Kind.LIMIT -> drawLimit(canvas, box, look)
         }
         if (!full) canvas.restore()
         canvas.restore()
@@ -797,7 +840,8 @@ class OverlayPillView(context: Context) : View(context) {
     }
 
     private fun drawMessage(canvas: Canvas, box: Box, look: Look, color: Int, check: Boolean, now: Long) {
-        val cy = box.centerY
+        // A success with a limit behind it has its title on the first line and the reason under it.
+        val cy = if (check && look.limit != null) box.top + dp(SOFT_LIMIT_H_DP) / 2f - dp(9f) else box.centerY
         val iconCx = box.left + dp(22f)
         strokePaint.color = color
         strokePaint.strokeWidth = dp(2.4f)
@@ -833,6 +877,12 @@ class OverlayPillView(context: Context) : View(context) {
         }
         canvas.drawText(msg, box.left + dp(38f), cy + textPaint.textSize / 2.8f, textPaint)
         if (retryable) drawRetryControls(canvas, box, look)
+        if (check && look.limit != null) {
+            val detail = Limits.describe(look.limit, stage = LimitStage.FORMATTING).detail
+            tinyTextPaint.color = ink(0xA6)
+            canvas.drawText(fitText(detail, tinyTextPaint, look.restingW - dp(48f)), box.left + dp(38f), cy + dp(10f) + tinyTextPaint.textSize, tinyTextPaint)
+            tinyTextPaint.color = palette.ink
+        }
     }
 
     /**
@@ -859,6 +909,70 @@ class OverlayPillView(context: Context) : View(context) {
         val chipRight = dismissBox.left - dp(6f)
         retryBox = Box(chipRight - chipW, cy - chipH / 2f, chipRight, cy + chipH / 2f)
         drawChip(canvas, retryBox, RETRY_LABEL, palette.accent, palette.onAccent, pressed && retryBox.inflate(dp(4f)).contains(downX, downY))
+    }
+
+    /**
+     * A refusal on a plan limit. What ran out, the allowance and when it comes back, then the ways
+     * forward: the web account page (Upgrade, when upgrading helps and the instance has a page),
+     * the user's own model, and Retry when the recording was kept. A cross waves it away.
+     */
+    private fun drawLimit(canvas: Canvas, box: Box, look: Look) {
+        val limit = look.limit ?: return
+        val copy = Limits.describe(limit)
+        val left = box.left + dp(16f)
+        val right = box.left + look.restingW - dp(12f)
+        val top = box.top + dp(12f)
+
+        // Row 1: a clock glyph, the title, the dismiss cross.
+        val iconCx = left + dp(8f)
+        val row1Cy = top + dp(10f)
+        strokePaint.color = palette.accent
+        strokePaint.strokeWidth = dp(1.8f)
+        canvas.drawCircle(iconCx, row1Cy, dp(7f), strokePaint)
+        canvas.drawLine(iconCx, row1Cy - dp(3.5f), iconCx, row1Cy, strokePaint)
+        canvas.drawLine(iconCx, row1Cy, iconCx + dp(2.6f), row1Cy + dp(1.8f), strokePaint)
+        val dismissR = dp(14f)
+        val dismissCx = right - dismissR
+        dismissBox = Box.centered(dismissCx, row1Cy, dismissR * 2, dismissR * 2)
+        paint.color = ink(if (pressed && dismissBox.inflate(dp(4f)).contains(downX, downY)) 0x3D else 0x1F)
+        canvas.drawCircle(dismissCx, row1Cy, dismissR - dp(2f), paint)
+        strokePaint.color = palette.inkSoft
+        strokePaint.strokeWidth = dp(2f)
+        val xr = dp(4f)
+        canvas.drawLine(dismissCx - xr, row1Cy - xr, dismissCx + xr, row1Cy + xr, strokePaint)
+        canvas.drawLine(dismissCx - xr, row1Cy + xr, dismissCx + xr, row1Cy - xr, strokePaint)
+        val textLeft = left + dp(26f)
+        canvas.drawText(fitText(copy.title, textPaint, dismissBox.left - dp(8f) - textLeft), textLeft, row1Cy + textPaint.textSize / 2.8f, textPaint)
+
+        // Row 2: the allowance and its reset, quieter.
+        tinyTextPaint.color = ink(0xA6)
+        val row2Baseline = row1Cy + dp(10f) + dp(4f) + tinyTextPaint.textSize
+        canvas.drawText(fitText(copy.detail, tinyTextPaint, right - textLeft), textLeft, row2Baseline, tinyTextPaint)
+        tinyTextPaint.color = palette.ink
+
+        // Row 3: the chips, right-aligned, Retry last so it sits where the error pill has it.
+        val chipH = dp(30f)
+        val chipCy = box.top + look.h - dp(12f) - chipH / 2f
+        var x = right
+        retryBox = Box.EMPTY
+        upgradeBox = Box.EMPTY
+        ownModelBox = Box.EMPTY
+        if (look.retryId != null) {
+            val w = retryChipWidth()
+            retryBox = Box(x - w, chipCy - chipH / 2f, x, chipCy + chipH / 2f)
+            drawChip(canvas, retryBox, RETRY_LABEL, palette.chip, palette.onChip, pressed && retryBox.inflate(dp(4f)).contains(downX, downY))
+            x = retryBox.left - dp(6f)
+        }
+        val ownW = smallTextPaint.measureText(OWN_MODEL_LABEL) + dp(24f)
+        ownModelBox = Box(x - ownW, chipCy - chipH / 2f, x, chipCy + chipH / 2f)
+        drawChip(canvas, ownModelBox, OWN_MODEL_LABEL, palette.chip, palette.onChip, pressed && ownModelBox.inflate(dp(4f)).contains(downX, downY))
+        x = ownModelBox.left - dp(6f)
+        val upgradeUrl = limit.upgradeUrl?.takeIf { copy.upgradeHelps }
+        if (upgradeUrl != null) {
+            val w = smallTextPaint.measureText(UPGRADE_LABEL) + dp(24f)
+            upgradeBox = Box(x - w, chipCy - chipH / 2f, x, chipCy + chipH / 2f)
+            drawChip(canvas, upgradeBox, UPGRADE_LABEL, palette.accent, palette.onAccent, pressed && upgradeBox.inflate(dp(4f)).contains(downX, downY))
+        }
     }
 
     // ---- flick between spots (normal mode) ------------------------------------------------------
@@ -1288,6 +1402,18 @@ class OverlayPillView(context: Context) : View(context) {
                     dismissBox.inflate(dp(4f)).contains(x, y) -> onDismissTap?.invoke()
                 }
             }
+            Kind.LIMIT -> {
+                val look = toLook
+                val limit = look.limit ?: return
+                val upgradeUrl = limit.upgradeUrl
+                val retryId = look.retryId
+                when {
+                    upgradeUrl != null && upgradeBox != Box.EMPTY && upgradeBox.inflate(dp(4f)).contains(x, y) -> onUpgradeTap?.invoke(upgradeUrl)
+                    ownModelBox != Box.EMPTY && ownModelBox.inflate(dp(4f)).contains(x, y) -> onOwnModelTap?.invoke()
+                    retryId != null && retryBox != Box.EMPTY && retryBox.inflate(dp(4f)).contains(x, y) -> onRetryTap?.invoke(retryId)
+                    dismissBox.inflate(dp(4f)).contains(x, y) -> onDismissTap?.invoke()
+                }
+            }
             else -> Unit
         }
     }
@@ -1483,6 +1609,8 @@ class OverlayPillView(context: Context) : View(context) {
     private companion object {
         const val FLICK_GHOST_FADE_MS = 220L
         const val RETRY_LABEL = "Retry"
+        const val UPGRADE_LABEL = "Upgrade"
+        const val OWN_MODEL_LABEL = "Own model"
         val NUDGES = listOf(-1 to 0, 1 to 0, 0 to -1, 0 to 1)
         val ARRANGEMENT_LABELS = listOf(
             OverlayArrangement.FREE to "Free",
