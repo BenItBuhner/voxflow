@@ -10,12 +10,18 @@ const log = createLogger('overlay')
 
 const WIDTH = 360
 const HEIGHT = 120
+/** A plan limit has more to say (two lines and up to four buttons): the window grows for it. */
+const LIMIT_WIDTH = 600
+const LIMIT_HEIGHT = 160
 const MARGIN = 28
 
 /** How long results stay up. An error that can be retried waits for the user much longer. */
 const SUCCESS_HOLD_MS = 1100
 const ERROR_HOLD_MS = 2800
 const RETRY_HOLD_MS = 15000
+/** A limit refusal is read, not glanced at; a text inserted unformatted deserves a beat more too. */
+const LIMIT_HOLD_MS = 20000
+const SOFT_LIMIT_HOLD_MS = 5000
 
 /**
  * The always-alive overlay window. It renders the pill *and* owns microphone capture (a renderer
@@ -118,8 +124,14 @@ export class OverlayWindow {
     this.state = state
     this.push()
     this.applyVisibility()
-    this.setInteractive(state.phase === 'error' && !!state.retryId)
+    this.setInteractive(state.phase === 'error' && (!!state.retryId || !!state.limit))
     this.armHideTimer()
+  }
+
+  /** The window's size for the current state: roomier while a plan limit is being explained. */
+  private size(): { width: number; height: number } {
+    if (!this.state.limit) return { width: WIDTH, height: HEIGHT }
+    return { width: LIMIT_WIDTH, height: this.state.phase === 'error' ? LIMIT_HEIGHT : HEIGHT }
   }
 
   private clearHideTimer(): void {
@@ -132,12 +144,19 @@ export class OverlayWindow {
   /** Results go away on their own; an error that can be retried waits for the user much longer. */
   private armHideTimer(): void {
     this.clearHideTimer()
-    const { phase, retryId } = this.state
+    const { phase, retryId, limit } = this.state
     if (phase !== 'success' && phase !== 'error') return
-    this.hideTimer = setTimeout(
-      () => this.setState({ phase: 'idle' }),
-      phase === 'success' ? SUCCESS_HOLD_MS : retryId ? RETRY_HOLD_MS : ERROR_HOLD_MS
-    )
+    const hold =
+      phase === 'success'
+        ? limit
+          ? SOFT_LIMIT_HOLD_MS
+          : SUCCESS_HOLD_MS
+        : limit
+          ? LIMIT_HOLD_MS
+          : retryId
+            ? RETRY_HOLD_MS
+            : ERROR_HOLD_MS
+    this.hideTimer = setTimeout(() => this.setState({ phase: 'idle' }), hold)
   }
 
   /** The user waved the pill's message away. */
@@ -203,12 +222,14 @@ export class OverlayWindow {
       const cursor = screen.getCursorScreenPoint()
       const display = screen.getDisplayNearestPoint(cursor)
       const area = display.workArea
-      let x = Math.round(area.x + (area.width - WIDTH) / 2)
-      let y = Math.round(area.y + area.height - HEIGHT - MARGIN)
+      const { width, height } = this.size()
+      let x = Math.round(area.x + (area.width - width) / 2)
+      let y = Math.round(area.y + area.height - height - MARGIN)
       if (this.position === 'top-center') y = area.y + MARGIN
-      if (this.position === 'bottom-right') x = area.x + area.width - WIDTH - MARGIN
+      if (this.position === 'bottom-right') x = area.x + area.width - width - MARGIN
       const b = this.win.getBounds()
-      if (b.x !== x || b.y !== y) this.win.setBounds({ x, y, width: WIDTH, height: HEIGHT })
+      if (b.x !== x || b.y !== y || b.width !== width || b.height !== height)
+        this.win.setBounds({ x, y, width, height })
     } catch (err) {
       log.warn('reposition failed', err)
     }

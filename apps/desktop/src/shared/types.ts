@@ -1,3 +1,4 @@
+import type { LimitNotice } from './limits'
 import type { InstallKind } from './updates'
 
 export type DictationMode = 'hold' | 'hands-free' | 'command'
@@ -17,6 +18,13 @@ export interface OverlayState {
    * Retry button and stays up until the user acts on it (or gives up on them after a while).
    */
   retryId?: string
+  /**
+   * A plan limit the Murmur instance applied to this dictation. On the error phase it is what
+   * refused the request (the pill explains it and offers Upgrade and the user's own provider next
+   * to Retry); on the success phase the text went in with rule-based cleanup only because the
+   * formatting model was paused or refused, and the pill says so quietly.
+   */
+  limit?: LimitNotice
 }
 
 export interface StageTimings {
